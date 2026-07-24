@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from difflib import SequenceMatcher
-from typing import Any, Sequence
+from typing import Any
 
 from .models import PageText
 from .text_models import DEFAULT_OPENAI_TEXT_MODEL, TEXT_MODEL_PROVIDERS, TextModelProvider
@@ -43,7 +44,7 @@ class CorrectionConfig:
         if value is None:
             return cls()
         if not isinstance(value, dict):
-            raise ValueError("correction must be an object.")
+            raise TypeError("correction must be an object.")
         return cls(
             mode=str(value.get("mode", "off")),
             provider=str(value.get("provider", "openai")),
