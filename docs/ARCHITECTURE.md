@@ -1,5 +1,32 @@
 # Architecture
 
+## Agent contract
+
+The repository has one authority chain rather than separate instructions for
+each model:
+
+```text
+vendor adapter -> AGENTS.md -> STATUS.md -> CODEMAP.md
+                                      |
+                                      v
+                         agent_contract.py -> CLI JSON
+                                      |
+                                      v
+                               drift-guard tests
+```
+
+`codebook_agent/agent_contract.py` owns machine discovery: commands,
+capabilities, entry points, output schema identifiers, environment boundaries,
+exit meanings, and the code map. `codebook_agent/cli_surface.py` owns the
+side-effect-free grammar, help, local health, and intent recovery.
+`codebook_agent/cli.py` owns execution and failure classification. Tests compare
+those surfaces so a new command or entry point cannot silently appear in only
+one place.
+
+This layer is side-effect-free. `codebook agent --json`, `capabilities --json`,
+`schema --json`, and `robot-docs guide` do not construct database or provider
+clients and do not write artifacts.
+
 ## Boundaries
 
 ```text

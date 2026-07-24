@@ -23,6 +23,7 @@
 - Low OCR confidence: inspect the cited PDF page; try higher DPI or a better Tesseract page
   segmentation mode, but do not silently treat uncertain OCR as exact wording.
 - `No local artifacts found`: local JSONL export requires a prior local ingest.
-- Leak guard failure: remove tracked PDFs, extracts, JSONL, artifacts, page images, embeddings,
-  database dumps, or real `.env*` files. The tracked `.env.example` variable-name template is
+- Leak guard failure: remove or ignore tracked/unignored PDFs, extracts, JSONL, artifacts, page
+  images, embeddings, database dumps, or real `.env*` files. The tracked `.env.example`
+  variable-name template is
   intentionally allowed.

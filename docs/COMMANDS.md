@@ -2,8 +2,11 @@
 
 | Command | Connections | Writes | Notes |
 | --- | --- | --- | --- |
+| `make agent-json` | None | None | One-call orientation, local health, entry points, and next actions |
+| `make robot-docs` | None | None | Compact operating guide for another agent |
+| `make schemas-json` | None | None | Stable machine-output shapes |
 | `make doctor` | None | None | Reports pgvector, PDFium, Tesseract, and URL presence |
-| `make caps-json` | None | None | Machine-readable capability contract |
+| `make caps-json` | None | None | Commands, capabilities, exit codes, environment, and change map |
 | `make ask` | None | None | Profile interview questions |
 | `make plan PDF=/path/book.pdf BACKEND=pgvector` | None | None | Shows exact schema/provider apply boundary |
 | `make dry PDF=/path/book.pdf BACKEND=pgvector` | None | None | Validates the same boundary without clients |
@@ -17,10 +20,30 @@
 | `make test-pgvector` | Local test database | Temporary schema | Mock-free real-service test |
 | `make pgvector-down` | Local Docker | Deletes Compose volume | Disposable-service teardown |
 | `make smoke` | None | Temporary directory | Local evidence contract |
-| `make clean` | None | Deletes only selected `artifacts/` | Never source or `.env` |
+| `make clean` | None | None | Previews the resolved generated-artifact target |
+| `make clean-apply` | None | Deletes only selected `artifacts/` | Explicit apply gate; never source or `.env` |
 
 `CODEBOOK_DATABASE_URL` selects PostgreSQL. The value is not emitted in command results. Search and
 answer infer the embedding provider/model from the stored corpus contract.
+
+The CLI supports the same discovery surface:
+
+```bash
+codebook                         # safe first-try command map
+codebook agent --json            # one-call machine orientation
+codebook help plan               # exact help for one command
+codebook capabilities --json     # `capabilities` is an alias for `caps`
+codebook schema --json
+codebook robot-docs guide --json
+```
+
+Machine data is emitted on stdout; warnings and errors use stderr. Exit codes
+have stable meanings: `0` success, `1` input error, `2` safety block, `3`
+environment error, `4` upstream failure, and `5` internal failure. The complete
+retry contract is available from `codebook capabilities --json`.
+
+Unambiguous command and long-option typos are corrected with a warning. Unknown
+or ambiguous input fails with a next-step hint and does not execute a write.
 
 Set `OCR_MODE=off`, `auto`, or `always` on `make plan`, `make dry`, or `make ingest`. The CLI also
 accepts `--ocr-language`, `--ocr-dpi`, `--ocr-page-segmentation-mode`,

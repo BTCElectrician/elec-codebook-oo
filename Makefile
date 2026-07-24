@@ -21,13 +21,22 @@ CODEBOOK_DATABASE_URL ?= postgresql://codebook:codebook-local-only@127.0.0.1:554
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor caps caps-json ask plan dry ingest export search answer example smoke test test-ocr test-pgvector lint leak-check check clean docker-build docker-run pgvector-up pgvector-down
+.PHONY: help agent-json robot-docs schemas-json doctor caps caps-json ask plan dry ingest export search answer example smoke test test-agent test-ocr test-pgvector lint leak-check check clean clean-apply docker-build docker-run pgvector-up pgvector-down
 
 help:
 	@$(PYTHON) -m codebook_agent help
 
+agent-json:
+	@$(PYTHON) -m codebook_agent agent --json
+
+robot-docs:
+	@$(PYTHON) -m codebook_agent robot-docs guide
+
+schemas-json:
+	@$(PYTHON) -m codebook_agent schema --json
+
 doctor:
-	@$(PYTHON) -m codebook_agent doctor --artifacts "$(ARTIFACTS)"
+	@$(PYTHON) -m codebook_agent doctor --artifacts "$(ARTIFACTS)" --json
 
 caps:
 	@$(PYTHON) -m codebook_agent caps
@@ -65,6 +74,9 @@ smoke:
 test:
 	@$(PYTHON) -m pytest -q
 
+test-agent:
+	@$(PYTHON) -m pytest -q tests/test_agent_contract.py tests/test_cli.py
+
 test-ocr:
 	@$(PYTHON) -m pytest -q -m ocr
 
@@ -81,7 +93,10 @@ check: lint test smoke leak-check
 	@git diff --check
 
 clean:
-	@$(PYTHON) -m codebook_agent clean --artifacts "$(ARTIFACTS)"
+	@$(PYTHON) -m codebook_agent clean --artifacts "$(ARTIFACTS)" --plan
+
+clean-apply:
+	@$(PYTHON) -m codebook_agent clean --artifacts "$(ARTIFACTS)" --apply
 
 docker-build:
 	@docker build -t elec-codebook-oo:local .

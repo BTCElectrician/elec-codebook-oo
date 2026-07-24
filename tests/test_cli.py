@@ -280,7 +280,7 @@ def test_profile_with_unknown_embedding_provider_fails_before_apply(tmp_path, ca
         encoding="utf-8",
     )
 
-    assert main(["plan", "--profile", str(profile), "--pdf", str(source)]) == 2
+    assert main(["plan", "--profile", str(profile), "--pdf", str(source)]) == 1
     assert "Unknown embedding provider" in capsys.readouterr().err
 
 
@@ -299,7 +299,7 @@ def test_pgvector_ingest_refuses_without_database_url(tmp_path, capsys, monkeypa
                 str(source),
             ]
         )
-        == 2
+        == 3
     )
     assert "CODEBOOK_DATABASE_URL" in capsys.readouterr().err
 
@@ -411,7 +411,7 @@ def test_postgres_errors_are_sanitized(capsys, monkeypatch):
         ),
     )
 
-    assert main(["caps"]) == 2
+    assert main(["caps"]) == 4
     error = capsys.readouterr().err
     assert "PostgreSQL operation failed" in error
     assert "secret" not in error
@@ -434,10 +434,36 @@ def test_text_provider_errors_are_sanitized(capsys, monkeypatch):
         ),
     )
 
-    assert main(["caps"]) == 2
+    assert main(["caps"]) == 4
     error = capsys.readouterr().err
     assert "Text-model provider operation failed" in error
     assert "secret-token-value" not in error
+
+
+def test_internal_invariant_failures_have_a_distinct_exit(capsys, monkeypatch):
+    monkeypatch.setattr(
+        cli,
+        "command",
+        lambda args: (_ for _ in ()).throw(RuntimeError("synthetic invariant")),
+    )
+
+    assert main(["caps"]) == 5
+    error = capsys.readouterr().err
+    assert "internal invariant failed" in error
+    assert "make check" in error
+
+
+def test_filesystem_permission_failures_are_environment_errors(capsys, monkeypatch):
+    monkeypatch.setattr(
+        cli,
+        "command",
+        lambda args: (_ for _ in ()).throw(PermissionError("synthetic denied")),
+    )
+
+    assert main(["caps"]) == 3
+    error = capsys.readouterr().err
+    assert "filesystem permission failure" in error
+    assert "codebook doctor" in error
 
 
 def test_clean_refuses_other_target(tmp_path, capsys):

@@ -2,9 +2,13 @@
 
 ## Current state
 
-Version 0.4.0 implements evidence-preserving ingestion, real local OCR fallback, optional
+Version 0.5.0 implements evidence-preserving ingestion, real local OCR fallback, optional
 model-based OCR correction, generic structure/table recovery, and citation-validated synthesis.
 Local JSON/JSONL remains the default. PostgreSQL/pgvector is the implemented searchable backend.
+
+The repository also exposes a vendor-neutral agent contract: canonical authority/current-state/
+change-map entry points, one-call machine orientation, command and output discovery, stable exit
+semantics, teaching errors with safe typo recovery, preview-first cleanup, and drift-guard tests.
 
 ## Implemented
 
@@ -25,6 +29,12 @@ Local JSON/JSONL remains the default. PostgreSQL/pgvector is the implemented sea
 - Hybrid reciprocal-rank-fusion retrieval
 - Search/query CLI, deterministic extractive answers, and optional citation-validated synthesis
 - No-connection `answer --plan` for provider/data-boundary review
+- Cross-model entry adapters that defer to one canonical `AGENTS.md`
+- `agent --json`, `capabilities --json`, `schema --json`, and `robot-docs guide`
+- Model-neutral conversation contract for understand/explain/change/run/verify intent
+- Deterministic stdout data, stderr diagnostics, and documented exit/retry semantics
+- Intent-to-owner code map and parser/contract/documentation drift guards
+- Preview-first cleanup with explicit `clean --apply`
 - Mock-free disposable pgvector integration test with production guards
 - Quote-safe Tesseract TSV parsing and same-content source-rename provenance refresh
 
@@ -51,3 +61,15 @@ make pgvector-up
 make test-pgvector
 make pgvector-down
 ```
+
+## Latest verified acceptance
+
+Verified locally on 2026-07-24:
+
+- `make check`: 86 passed, 2 real-service tests skipped by the credential-free default lane;
+- real local OCR lane: passed;
+- disposable pgvector lane: 2 passed, including OCR-to-retrieval;
+- agent determinism, stdout/stderr separation, and non-TTY discipline: passed;
+- v0.5.0 Docker wheel/image build: passed;
+- packaged `agent --json` entrypoint and non-root UID 10001 runtime: passed;
+- disposable pgvector container, network, and volume removed after validation.

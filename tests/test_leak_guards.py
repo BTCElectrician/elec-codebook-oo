@@ -1,7 +1,7 @@
 import subprocess
 from pathlib import Path
 
-from scripts.leak_guard import is_forbidden
+from scripts.leak_guard import is_forbidden, main
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -28,6 +28,23 @@ def test_profiles_contain_no_extracted_text_fields():
         profile = path.read_text(encoding="utf-8")
         for forbidden in ('"text"', '"content"', '"chunk"'):
             assert forbidden not in profile
+
+
+def test_leak_guard_scans_untracked_nonignored_files(monkeypatch, capsys):
+    def synthetic_ls_files(command, text):
+        assert command == [
+            "git",
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ]
+        assert text is True
+        return "scratch/operator-source.pdf\n"
+
+    monkeypatch.setattr(subprocess, "check_output", synthetic_ls_files)
+    assert main() == 1
+    assert "operator-source.pdf" in capsys.readouterr().err
 
 
 def test_tracked_file_leak_guard_passes():
