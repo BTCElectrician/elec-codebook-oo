@@ -4,6 +4,8 @@ Do not report secrets or user book content in public issues. Do not commit `.env
 artifacts, page images, JSONL exports, embeddings, database dumps, indexes, or provider credentials.
 Planning commands instantiate no network clients. Pgvector and optional embedding operations are
 explicitly selected, isolated from the base install, and must document their data destination.
+PDFium rendering and Tesseract OCR are local-only; temporary page bytes stay in process and are not
+written by the OCR adapter.
 
 For a security report, contact the repository owner privately through GitHub rather than attaching
 reproduction material containing a source book or credential.

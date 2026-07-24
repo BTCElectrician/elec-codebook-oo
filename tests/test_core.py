@@ -56,7 +56,7 @@ def test_documents_preserve_page_type_and_heading_context(tmp_path):
     assert documents[1].content_type == "definitions"
     assert documents[-1].content_type == "tables"
     assert documents[-1].printed_page_start == 2
-    assert all(document.schema_version == "2.0" for document in documents)
+    assert all(document.schema_version == "2.1" for document in documents)
 
 
 def test_invalid_profile_backend_is_rejected(tmp_path):

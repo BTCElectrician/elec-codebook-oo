@@ -8,7 +8,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .models import CodebookDocument, PageText
+from .models import DOCUMENT_SCHEMA_VERSION, CodebookDocument, PageText
+from .ocr import OCRConfig, TesseractOCR, native_text_is_usable
 
 SUPPORTED_BACKENDS = {"local-artifacts", "pgvector"}
 PROFILE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -46,6 +47,7 @@ def load_profile(path: Path) -> dict[str, Any]:
     offset = profile.get("printed_page_offset")
     if offset is not None and not isinstance(offset, int):
         raise ValueError("printed_page_offset must be an integer or null.")
+    OCRConfig.from_profile(profile.get("ocr"))
     return profile
 
 
@@ -54,9 +56,13 @@ def plan(
     source_path: Path,
     *,
     backend: str | None = None,
+    ocr_overrides: dict[str, object] | None = None,
 ) -> dict[str, Any]:
     profile = load_profile(profile_path)
     selected_backend = backend or profile["backend"]
+    ocr_config_value = dict(profile.get("ocr") or {})
+    ocr_config_value.update(ocr_overrides or {})
+    ocr_config = OCRConfig.from_profile(ocr_config_value)
     if selected_backend not in SUPPORTED_BACKENDS:
         raise ValueError(
             f"Backend '{selected_backend}' is not implemented. "
@@ -73,8 +79,17 @@ def plan(
         ),
         "profile": {"id": profile["id"], "title": profile["title"], "backend": selected_backend},
         "source": {"path": str(source_path.resolve()), "exists": source_path.is_file()},
-        "document_schema_version": "2.0",
-        "evidence": ["source SHA-256", "PDF page", "printed page", "article", "section"],
+        "ocr": {**ocr_config.to_dict(), "network": False, "checked_during_plan": False},
+        "document_schema_version": DOCUMENT_SCHEMA_VERSION,
+        "evidence": [
+            "source SHA-256",
+            "PDF page",
+            "printed page",
+            "article",
+            "section",
+            "extraction method",
+            "OCR confidence",
+        ],
         "next": "Run dry for a no-write check, then request approval before ingest --apply.",
     }
 
@@ -89,17 +104,45 @@ def source_sha256(source_path: Path) -> str:
     return digest.hexdigest()
 
 
-def extract_pages(source_path: Path, *, printed_page_offset: int | None = None) -> list[PageText]:
+def extract_pages(
+    source_path: Path,
+    *,
+    printed_page_offset: int | None = None,
+    ocr: OCRConfig | None = None,
+) -> list[PageText]:
     """Extract source text without discarding page boundaries."""
 
     if source_path.suffix.lower() in {".txt", ".md"}:
         raw_pages = source_path.read_text(encoding="utf-8").split("\f")
+        extraction_methods = ["native-text"] * len(raw_pages)
+        extraction_confidences: list[float | None] = [None] * len(raw_pages)
     elif source_path.suffix.lower() == ".pdf":
         try:
             from pypdf import PdfReader  # type: ignore[import-not-found]
         except ImportError as error:
-            raise RuntimeError("PDF support is optional. Install it with: pip install '.[pdf]'") from error
+            raise RuntimeError(
+                "PDF support is optional. Install it with: pip install '.[pdf]'"
+            ) from error
         raw_pages = [page.extract_text() or "" for page in PdfReader(str(source_path)).pages]
+        extraction_methods = ["native-pdf-text"] * len(raw_pages)
+        extraction_confidences = [None] * len(raw_pages)
+        ocr_config = ocr or OCRConfig(mode="off")
+        if ocr_config.mode != "off":
+            ocr_pages = [
+                pdf_page
+                for pdf_page, text in enumerate(raw_pages, start=1)
+                if ocr_config.mode == "always"
+                or not native_text_is_usable(
+                    text,
+                    min_characters=ocr_config.min_native_characters,
+                )
+            ]
+            ocr_results = TesseractOCR(ocr_config).extract_pages(source_path, ocr_pages)
+            for pdf_page, result in ocr_results.items():
+                if result.text.strip():
+                    raw_pages[pdf_page - 1] = result.text
+                    extraction_methods[pdf_page - 1] = "ocr-tesseract"
+                    extraction_confidences[pdf_page - 1] = result.confidence
     else:
         raise ValueError("Supported local inputs are .txt, .md, or .pdf (with the pdf extra).")
 
@@ -109,7 +152,15 @@ def extract_pages(source_path: Path, *, printed_page_offset: int | None = None) 
         if printed_page_offset is not None:
             candidate = pdf_page - printed_page_offset
             printed_page = candidate if candidate > 0 else None
-        pages.append(PageText(pdf_page=pdf_page, printed_page=printed_page, text=text))
+        pages.append(
+            PageText(
+                pdf_page=pdf_page,
+                printed_page=printed_page,
+                text=text,
+                extraction_method=extraction_methods[pdf_page - 1],
+                extraction_confidence=extraction_confidences[pdf_page - 1],
+            )
+        )
     return pages
 
 
@@ -257,7 +308,11 @@ def documents_from_pages(
                         section_title=section_title,
                         edition=str(profile["edition"]) if profile.get("edition") is not None else None,
                         document_type=str(profile["document_type"]),
-                        metadata={"backend": str(profile["backend"])},
+                        metadata={
+                            "backend": str(profile["backend"]),
+                            "extraction_method": page.extraction_method,
+                            "extraction_confidence": page.extraction_confidence,
+                        },
                     )
                 )
     return documents
@@ -270,6 +325,7 @@ def build_documents(profile: dict[str, Any], source_path: Path) -> list[Codebook
     pages = extract_pages(
         source_path,
         printed_page_offset=profile.get("printed_page_offset"),
+        ocr=OCRConfig.from_profile(profile.get("ocr")),
     )
     documents = documents_from_pages(profile, source_path, pages, source_hash=source_hash)
     if not documents:

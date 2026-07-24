@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-DOCUMENT_SCHEMA_VERSION = "2.0"
+DOCUMENT_SCHEMA_VERSION = "2.1"
 EMBEDDING_DIMENSIONS = 1536
 
 
@@ -16,6 +16,8 @@ class PageText:
     pdf_page: int
     text: str
     printed_page: int | None = None
+    extraction_method: str = "native"
+    extraction_confidence: float | None = None
 
 
 @dataclass(frozen=True)
@@ -75,6 +77,12 @@ class SearchResult:
         parts.append(f"PDF page {self.document.pdf_page_start}")
         if self.document.printed_page_start is not None:
             parts.append(f"printed page {self.document.printed_page_start}")
+        if self.document.metadata.get("extraction_method") == "ocr-tesseract":
+            confidence = self.document.metadata.get("extraction_confidence")
+            if isinstance(confidence, (int, float)):
+                parts.append(f"OCR confidence {confidence:.0%}")
+            else:
+                parts.append("OCR-derived")
         return ", ".join(parts)
 
     def to_dict(self) -> dict[str, Any]:
