@@ -1,5 +1,9 @@
 # Elec Codebook OO
 
+<div align="center">
+  <img src="docs/assets/elec-codebook-oo-hero.webp" alt="Elec Codebook OO by Ohmni Oracle — open-source, local-first, source-cited codebook processing" width="100%">
+</div>
+
 [![Test](https://github.com/BTCElectrician/elec-codebook-oo/actions/workflows/ci.yml/badge.svg)](https://github.com/BTCElectrician/elec-codebook-oo/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![Version 0.3.1](https://img.shields.io/badge/version-0.3.1-6f42c1)](pyproject.toml)
