@@ -1,0 +1,9 @@
+services:
+  codebook:
+    build: .
+    image: elec-codebook-oo:local
+    user: "10001:10001"
+    volumes:
+      - ./artifacts:/app/artifacts
+      - ${CODEBOOK_SOURCE_DIR:-./examples/synthetic-codebook}:/books:ro
+    command: doctor

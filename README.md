@@ -12,6 +12,7 @@ chat, and vector backends are deliberately not implemented yet.
 ## Quick start
 
 ```bash
+python -m pip install -e '.[dev]'
 make doctor
 make caps-json
 make ask

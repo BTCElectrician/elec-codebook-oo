@@ -5,7 +5,7 @@ ARTIFACTS ?= artifacts
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor caps caps-json ask plan dry ingest export example smoke test lint check clean
+.PHONY: help doctor caps caps-json ask plan dry ingest export example smoke test lint leak-check check clean docker-build docker-run
 
 help:
 	@$(PYTHON) -m codebook_agent help
@@ -46,7 +46,17 @@ test:
 lint:
 	@$(PYTHON) -m ruff check .
 
-check: test smoke
+leak-check:
+	@$(PYTHON) scripts/leak_guard.py
+
+check: lint test smoke leak-check
+	@git diff --check
 
 clean:
 	@$(PYTHON) -m codebook_agent clean --artifacts "$(ARTIFACTS)"
+
+docker-build:
+	@docker build -t elec-codebook-oo:local .
+
+docker-run:
+	@docker compose run --rm codebook doctor
