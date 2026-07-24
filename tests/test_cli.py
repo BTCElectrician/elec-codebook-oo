@@ -31,9 +31,35 @@ def test_local_ingest_and_export(tmp_path):
         for line in exported.read_text(encoding="utf-8").splitlines()
     ]
     assert len(rows) == 2
-    assert rows[0]["schema_version"] == "2.0"
+    assert rows[0]["schema_version"] == "2.1"
     assert rows[0]["pdf_page_start"] == 1
     assert rows[0]["source_sha256"]
+
+
+def test_plan_reports_effective_ocr_overrides(tmp_path, capsys):
+    source = tmp_path / "book.txt"
+    source.write_text("synthetic", encoding="utf-8")
+    assert (
+        main(
+            [
+                "plan",
+                "--pdf",
+                str(source),
+                "--ocr-mode",
+                "always",
+                "--ocr-dpi",
+                "400",
+                "--ocr-page-segmentation-mode",
+                "6",
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ocr"]["mode"] == "always"
+    assert payload["ocr"]["dpi"] == 400
+    assert payload["ocr"]["page_segmentation_mode"] == 6
+    assert payload["ocr"]["network"] is False
 
 
 def test_pgvector_ingest_refuses_without_database_url(tmp_path, capsys, monkeypatch):

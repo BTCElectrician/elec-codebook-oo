@@ -1,7 +1,7 @@
 # Docker
 
-Native Python remains supported. The application image excludes `.env`, PDFs, artifacts, and
-output, and runs as a non-root user.
+Native Python remains supported. The application image includes PDFium and the local Tesseract
+executable, excludes `.env`, PDFs, artifacts, and output, and runs as a non-root user.
 
 ```bash
 make docker-build

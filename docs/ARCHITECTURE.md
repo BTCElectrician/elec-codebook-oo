@@ -3,7 +3,7 @@
 ## Boundaries
 
 ```text
-source -> extractor -> CodebookDocument v2 -> backend -> SearchResult -> answer renderer
+source -> native extractor -> optional OCR fallback -> CodebookDocument v2.1 -> backend -> SearchResult -> answer renderer
 ```
 
 - Extraction owns source identity and page evidence.
@@ -14,13 +14,25 @@ source -> extractor -> CodebookDocument v2 -> backend -> SearchResult -> answer 
 ## Document flow
 
 `extract_pages` emits one `PageText` per PDF page. Text and Markdown fixtures use form-feed as an
-optional synthetic page boundary. `documents_from_pages` splits paragraphs without crossing pages,
+optional synthetic page boundary. PDFs first use pypdf. In `auto` mode, pages without enough native
+text are rendered locally through PDFium and processed by Tesseract. `PageText` retains the
+extraction method and OCR confidence. `documents_from_pages` splits paragraphs without crossing pages,
 carries generic article/section context forward, applies content types from configured page ranges,
 and creates deterministic IDs.
 
 Both local JSON and pgvector receive the same `CodebookDocument` representation. The JSON `metadata`
 field is the extension point for another manual; stable evidence fields change only through a schema
 version.
+
+## OCR
+
+OCR is deliberately an extraction adapter, not an answer model. It makes no network calls.
+`off`, `auto`, and `always` modes are profile/CLI controlled. Tesseract TSV output is reconstructed
+into paragraphs, and mean word confidence is carried into document metadata and citations.
+
+The synthetic OCR regression creates an image-only PDF at test time, proves pypdf sees no text,
+then exercises real PDFium rendering and Tesseract. The combined integration test indexes that
+result in disposable pgvector and retrieves the invented wording.
 
 ## pgvector
 

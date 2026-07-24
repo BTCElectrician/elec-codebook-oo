@@ -26,7 +26,7 @@ class GroundedAnswer:
 
 
 def answer_from_results(query: str, results: list[SearchResult]) -> GroundedAnswer:
-    """Return source wording and citations without inventing missing conclusions."""
+    """Return extracted wording and citations without inventing missing conclusions."""
 
     if not results:
         return GroundedAnswer(

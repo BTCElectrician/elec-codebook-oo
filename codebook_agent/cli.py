@@ -15,20 +15,26 @@ from .answers import answer_from_results
 from .backends.local import export_jsonl, write_documents
 from .core import SUPPORTED_BACKENDS, build_documents, load_profile, plan
 from .embeddings import build_embedding_provider
+from .ocr import OCR_MODES
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 DEFAULT_PROFILE = PACKAGE_ROOT / "profiles" / "generic-reference-template.json"
 DEFAULT_SOURCE = PACKAGE_ROOT / "data" / "synthetic_source.txt"
 
 CAPABILITIES = {
-    "schema_version": "2.0",
-    "document_schema_version": "2.0",
+    "schema_version": "2.1",
+    "document_schema_version": "2.1",
     "implemented_backends": ["local-artifacts", "pgvector"],
     "implemented_retrieval_backends": ["pgvector"],
     "implemented_embedding_providers": ["hash", "openai"],
+    "implemented_ocr_engines": ["tesseract"],
     "implemented_answer_modes": ["extractive-grounded"],
     "candidate_backends": ["lancedb", "qdrant", "opensearch"],
-    "not_implemented": ["azure-ai-search", "ocr", "generative-answer-synthesis"],
+    "not_implemented": [
+        "azure-ai-search",
+        "generative-answer-synthesis",
+        "model-based-ocr-cleanup",
+    ],
     "commands": {
         "plan": {"network": False, "writes": False, "apply_required": False},
         "dry": {"network": False, "writes": False, "apply_required": False},
@@ -99,6 +105,15 @@ def _embedding_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--embedding-model")
 
 
+def _ocr_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--ocr-mode", choices=sorted(OCR_MODES))
+    parser.add_argument("--ocr-language")
+    parser.add_argument("--ocr-dpi", type=int)
+    parser.add_argument("--ocr-page-segmentation-mode", type=int)
+    parser.add_argument("--ocr-min-native-characters", type=int)
+    parser.add_argument("--ocr-timeout-seconds", type=int)
+
+
 def _retrieval_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser], name: str) -> None:
     parser = sub.add_parser(name, help=f"{name} an indexed corpus with source evidence")
     _profile_arg(parser)
@@ -126,16 +141,19 @@ def build_parser() -> argparse.ArgumentParser:
     _profile_arg(planner)
     _source_arg(planner)
     _backend_arg(planner)
+    _ocr_args(planner)
     dry = sub.add_parser("dry", help="validate the plan without writes or connections")
     _profile_arg(dry)
     _source_arg(dry)
     _backend_arg(dry)
+    _ocr_args(dry)
     ingest = sub.add_parser("ingest", help="ingest after explicit apply")
     _profile_arg(ingest)
     _source_arg(ingest)
     _backend_arg(ingest)
     _postgres_args(ingest)
     _embedding_args(ingest)
+    _ocr_args(ingest)
     ingest.add_argument("--artifacts", type=Path, default=Path("artifacts"))
     ingest.add_argument("--apply", action="store_true", help="required to create artifacts or indexes")
     export = sub.add_parser("export", help="export local artifacts")
@@ -161,6 +179,7 @@ def _help() -> None:
   make dry          no-write, no-connection validation
   make ingest       apply-gated local or pgvector ingestion
   make export       portable local JSONL export
+  make test-ocr     real local OCR test on generated image-only PDF
   make search       pgvector hybrid retrieval with source evidence
   make answer       deterministic evidence-grounded answer
   make smoke        synthetic local evidence test
@@ -212,6 +231,27 @@ def _provider_for_profile(
     )
 
 
+def _profile_with_ocr_overrides(
+    profile: dict[str, object],
+    args: argparse.Namespace,
+) -> dict[str, object]:
+    ocr = dict(profile.get("ocr") or {})
+    ocr.update(_ocr_overrides(args))
+    return {**profile, "ocr": ocr}
+
+
+def _ocr_overrides(args: argparse.Namespace) -> dict[str, object]:
+    overrides: dict[str, object | None] = {
+        "mode": getattr(args, "ocr_mode", None),
+        "language": getattr(args, "ocr_language", None),
+        "dpi": getattr(args, "ocr_dpi", None),
+        "page_segmentation_mode": getattr(args, "ocr_page_segmentation_mode", None),
+        "min_native_characters": getattr(args, "ocr_min_native_characters", None),
+        "timeout_seconds": getattr(args, "ocr_timeout_seconds", None),
+    }
+    return {key: value for key, value in overrides.items() if value is not None}
+
+
 def _pgvector_backend(schema: str):
     from .backends.pgvector import PgVectorBackend
 
@@ -247,6 +287,8 @@ def command(args: argparse.Namespace) -> int:
             "artifact_parent": str(parent),
             "writable": parent.exists() and parent.is_dir(),
             "postgres_extra": _module_available("psycopg") and _module_available("pgvector"),
+            "ocr_extra": _module_available("pypdfium2"),
+            "tesseract": shutil.which("tesseract") is not None,
             "database_url_configured": bool(os.getenv("CODEBOOK_DATABASE_URL")),
         }
         _json(result)
@@ -261,7 +303,12 @@ def command(args: argparse.Namespace) -> int:
         for number, question in enumerate(profile["questions"], start=1):
             print(f"{number}. {question}")
     elif args.command in {"plan", "dry"}:
-        result = plan(args.profile, args.pdf, backend=args.backend)
+        result = plan(
+            args.profile,
+            args.pdf,
+            backend=args.backend,
+            ocr_overrides=_ocr_overrides(args),
+        )
         if not result["source"]["exists"]:
             raise FileNotFoundError(f"Source not found: {args.pdf}")
         result["operation"] = "codebook-dry-run" if args.command == "dry" else result["operation"]
@@ -273,8 +320,15 @@ def command(args: argparse.Namespace) -> int:
         selected_backend = args.backend or profile["backend"]
         if not args.pdf.is_file():
             raise FileNotFoundError(f"Source not found: {args.pdf}")
-        effective_profile = {**profile, "backend": selected_backend}
+        effective_profile = {
+            **_profile_with_ocr_overrides(profile, args),
+            "backend": selected_backend,
+        }
         documents = build_documents(effective_profile, args.pdf)
+        ocr_documents = sum(
+            document.metadata.get("extraction_method") == "ocr-tesseract"
+            for document in documents
+        )
         if selected_backend == "local-artifacts":
             destination = write_documents(args.artifacts, str(profile["id"]), documents)
             _json(
@@ -282,6 +336,7 @@ def command(args: argparse.Namespace) -> int:
                     "operation": "local-ingest",
                     "network": False,
                     "documents": len(documents),
+                    "ocr_documents": ocr_documents,
                     "artifact": str(destination),
                     "source_sha256": documents[0].source_sha256,
                 }
@@ -307,6 +362,7 @@ def command(args: argparse.Namespace) -> int:
                     "database": "configured CODEBOOK_DATABASE_URL",
                     "schema": args.schema,
                     "documents": count,
+                    "ocr_documents": ocr_documents,
                     "embedding_provider": provider.name,
                     "embedding_model": provider.model,
                     "source_sha256": documents[0].source_sha256,
@@ -372,7 +428,14 @@ def _module_available(name: str) -> bool:
 def main(argv: Sequence[str] | None = None) -> int:
     try:
         return command(build_parser().parse_args(argv))
-    except (FileNotFoundError, PermissionError, RuntimeError, ValueError, json.JSONDecodeError) as error:
+    except (
+        FileNotFoundError,
+        PermissionError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
 

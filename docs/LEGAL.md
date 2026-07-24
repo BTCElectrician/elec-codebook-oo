@@ -9,6 +9,8 @@ Extracted chunks, page images, JSONL, embeddings, database rows, indexes, and lo
 protected derivatives. They are ignored by git and excluded from Docker context by default. Do not
 publish a populated pgvector database or dump merely because the software is open source.
 
-PDF support is an optional `pypdf` extra; no copyleft/commercial-risk PDF engine is required by the
-base package. References to NEC/NFPA 70 describe engineering lessons and an optional profile shape,
-not affiliation, endorsement, permission, or bundled source material.
+PDF support is an optional `pypdf` extra. The OCR extra uses pypdfium2/PDFium for local rendering
+and Tesseract for local OCR; review the notices shipped by those dependencies for redistribution.
+No strong-copyleft PDF renderer is required by the project. References to NEC/NFPA 70 describe
+engineering lessons and an optional profile shape, not affiliation, endorsement, permission, or
+bundled source material.

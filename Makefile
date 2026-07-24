@@ -3,12 +3,13 @@ PROFILE ?= codebook_agent/profiles/generic-reference-template.json
 PDF ?= examples/synthetic-codebook/source.txt
 ARTIFACTS ?= artifacts
 BACKEND ?= local-artifacts
+OCR_MODE ?= auto
 QUERY ?= synthetic branch circuit
 CODEBOOK_DATABASE_URL ?= postgresql://codebook:codebook-local-only@127.0.0.1:55432/codebook_test
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor caps caps-json ask plan dry ingest export search answer example smoke test test-pgvector lint leak-check check clean docker-build docker-run pgvector-up pgvector-down
+.PHONY: help doctor caps caps-json ask plan dry ingest export search answer example smoke test test-ocr test-pgvector lint leak-check check clean docker-build docker-run pgvector-up pgvector-down
 
 help:
 	@$(PYTHON) -m codebook_agent help
@@ -26,13 +27,13 @@ ask:
 	@$(PYTHON) -m codebook_agent ask --profile "$(PROFILE)"
 
 plan:
-	@$(PYTHON) -m codebook_agent plan --profile "$(PROFILE)" --pdf "$(PDF)" --backend "$(BACKEND)"
+	@$(PYTHON) -m codebook_agent plan --profile "$(PROFILE)" --pdf "$(PDF)" --backend "$(BACKEND)" --ocr-mode "$(OCR_MODE)"
 
 dry:
-	@$(PYTHON) -m codebook_agent dry --profile "$(PROFILE)" --pdf "$(PDF)" --backend "$(BACKEND)"
+	@$(PYTHON) -m codebook_agent dry --profile "$(PROFILE)" --pdf "$(PDF)" --backend "$(BACKEND)" --ocr-mode "$(OCR_MODE)"
 
 ingest:
-	@CODEBOOK_DATABASE_URL="$(CODEBOOK_DATABASE_URL)" $(PYTHON) -m codebook_agent ingest --apply --profile "$(PROFILE)" --pdf "$(PDF)" --artifacts "$(ARTIFACTS)" --backend "$(BACKEND)"
+	@CODEBOOK_DATABASE_URL="$(CODEBOOK_DATABASE_URL)" $(PYTHON) -m codebook_agent ingest --apply --profile "$(PROFILE)" --pdf "$(PDF)" --artifacts "$(ARTIFACTS)" --backend "$(BACKEND)" --ocr-mode "$(OCR_MODE)"
 
 export:
 	@$(PYTHON) -m codebook_agent export jsonl --profile "$(PROFILE)" --artifacts "$(ARTIFACTS)"
@@ -51,6 +52,9 @@ smoke:
 
 test:
 	@$(PYTHON) -m pytest -q
+
+test-ocr:
+	@$(PYTHON) -m pytest -q -m ocr
 
 test-pgvector:
 	@CODEBOOK_TEST_DATABASE_URL="$(CODEBOOK_DATABASE_URL)" $(PYTHON) -m pytest -q -m pgvector

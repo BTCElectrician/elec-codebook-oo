@@ -7,6 +7,15 @@
   "content_ranges": {"front_matter": [], "main": [], "definitions": [], "tables": []},
   "printed_page_offset": null,
   "max_chunk_chars": 1800,
+  "ocr": {
+    "mode": "auto",
+    "engine": "tesseract",
+    "language": "eng",
+    "dpi": 300,
+    "page_segmentation_mode": 3,
+    "min_native_characters": 40,
+    "timeout_seconds": 120
+  },
   "backend": "local-artifacts",
   "embedding": {"provider": "hash", "model": "codebook-hash-v1"},
   "questions": [
