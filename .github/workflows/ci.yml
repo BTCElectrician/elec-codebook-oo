@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -22,8 +25,8 @@ jobs:
           --health-timeout 3s
           --health-retries 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
       - run: python -m pip install -e '.[dev,pdf,postgres]'
