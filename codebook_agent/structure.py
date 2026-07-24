@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any
 
 from .models import PageText
 
@@ -37,11 +38,11 @@ class StructureConfig:
         if value is None:
             return cls()
         if not isinstance(value, dict):
-            raise ValueError("structure must be an object.")
+            raise TypeError("structure must be an object.")
         enabled = value.get("enabled", False)
         recover_tables = value.get("recover_tables", True)
         if not isinstance(enabled, bool) or not isinstance(recover_tables, bool):
-            raise ValueError("structure enabled and recover_tables must be booleans.")
+            raise TypeError("structure enabled and recover_tables must be booleans.")
         return cls(enabled=enabled, recover_tables=recover_tables)
 
 

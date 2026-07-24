@@ -87,5 +87,5 @@ def test_profile_rejects_invalid_structure_flags(tmp_path):
         '"questions":[],"structure":{"enabled":"yes"}}',
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="must be booleans"):
+    with pytest.raises(TypeError, match="must be booleans"):
         load_profile(path)
