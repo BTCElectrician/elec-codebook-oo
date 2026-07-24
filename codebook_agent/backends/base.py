@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Protocol
 
-from ..models import CodebookDocument, SearchResult
+from ..models import CodebookDocument, PageText, SearchResult
 
 
 class RetrievalBackend(Protocol):
@@ -19,6 +19,7 @@ class RetrievalBackend(Protocol):
         embeddings: Sequence[Sequence[float]],
         embedding_provider: str,
         embedding_model: str,
+        pages: Sequence[PageText] | None = None,
     ) -> int:
         """Atomically replace a corpus with the supplied documents."""
 

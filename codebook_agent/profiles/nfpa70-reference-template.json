@@ -16,6 +16,14 @@
     "min_native_characters": 40,
     "timeout_seconds": 120
   },
+  "correction": {
+    "mode": "off",
+    "provider": "openai",
+    "model": "gpt-5.6-terra",
+    "min_similarity": 0.82,
+    "max_length_change_ratio": 0.2
+  },
+  "structure": {"enabled": true, "recover_tables": true},
   "backend": "local-artifacts",
   "embedding": {"provider": "hash", "model": "codebook-hash-v1"},
   "questions": [
@@ -23,6 +31,7 @@
     "What is the absolute source PDF path?",
     "Which PDF pages contain main content, definitions, tables, and appendices?",
     "Does the printed page numbering differ from the PDF page index?",
+    "Should uncertain OCR be sent to an optional text model for correction?",
     "Where should local artifacts be written?"
   ]
 }

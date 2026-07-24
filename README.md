@@ -6,7 +6,7 @@
 
 [![Test](https://github.com/BTCElectrician/elec-codebook-oo/actions/workflows/ci.yml/badge.svg)](https://github.com/BTCElectrician/elec-codebook-oo/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
-[![Version 0.3.1](https://img.shields.io/badge/version-0.3.1-6f42c1)](pyproject.toml)
+[![Version 0.4.0](https://img.shields.io/badge/version-0.4.0-6f42c1)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **Turn an authorized codebook, specification, or technical manual into page-cited local records or
@@ -38,14 +38,21 @@ to whichever database was chosen first.
 retains source identity, PDF page, optional printed page, content type, and article/section context.
 The same records can be exported as JSONL or indexed in PostgreSQL with pgvector.
 
-| Capability | What works in v0.3.1 |
+For installers and tradespeople learning to code, that creates a practical teaching tool: bring an
+authorized manual, inspect how it was processed, search it in ordinary language, and trace every
+answer back to wording and pages you can verify. AI is optional assistance around the source—not a
+replacement for the book, training, or field judgment.
+
+| Capability | What works in v0.4.0 |
 | --- | --- |
 | Evidence-preserving ingestion | Text, Markdown, native PDF text, and local OCR remain page-local |
 | Real OCR fallback | Image-only or low-text PDF pages use local Tesseract with confidence metadata |
+| Auditable OCR correction | Optional model repair preserves raw text and rejects changed identifiers |
+| Structure recovery | Generic headings, notes, definitions, lists, and explicitly continued tables |
 | Portable records | Versioned JSON and JSONL with source SHA-256 and explicit locators |
 | pgvector indexing | Atomic corpus replacement with stale-record cleanup |
 | Hybrid retrieval | PostgreSQL full-text search plus pgvector cosine similarity |
-| Grounded answers | Deterministic extracted wording with article, section, PDF page, and printed page |
+| Grounded answers | Extractive by default; optional synthesis must use valid evidence labels |
 | Neutral profiles | Generic metadata, content ranges, page offset, backend, and embedding selection |
 | Safe operations | Exact no-write apply preview and explicit `--apply` before artifacts or database writes |
 | Real verification | Mock-free integration test against a disposable pgvector service |
@@ -93,7 +100,7 @@ authorized .txt / .md / .pdf
                      |
                      | ingest --apply
                      v
-        native page extraction
+       native page extraction
                      |
              usable text? -- no --> local PDFium render
                      |                    |
@@ -101,15 +108,22 @@ authorized .txt / .md / .pdf
                      |            + confidence/provenance
                      +---------+----------+
                                |
+                optional model correction
+              raw text retained + validators
+                               |
+               generic structure recovery
+             headings / lists / notes / tables
+                               |
         page-preserving evidence and chunking
                      |
                      v
-       CodebookDocument schema v2.1
+       PageText v1.0 + CodebookDocument v2.2
        - source SHA-256
        - PDF + printed page
        - content type
        - article + section
-       - native or labeled OCR-derived evidence text
+       - raw + selected page text
+       - native, OCR-derived, or model-corrected provenance
        - extraction method + OCR confidence
                      |
            +---------+----------+
@@ -127,7 +141,8 @@ authorized .txt / .md / .pdf
                       |                   |
                       v                   v
               search / query          answer
-            extracted passages    passages + citations
+            extracted passages    extractive (default)
+                                      or citation-validated synthesis
 ```
 
 Ingestion owns evidence. A backend owns storage and ranking. The answer layer consumes only
@@ -150,10 +165,13 @@ Every `CodebookDocument` has:
 | `article_*` / `section_*` | Generic heading context when detected |
 | `metadata.extraction_method` | `native-text`, `native-pdf-text`, or `ocr-tesseract` |
 | `metadata.extraction_confidence` | Mean Tesseract word confidence for OCR-derived text |
+| `metadata.correction_*` | Model, score, and accepted/rejected correction decision |
+| `metadata.raw_text_sha256` | Link from a chunk to its immutable raw page extraction |
 | `metadata` | JSON extension point for another manual or downstream schema |
-| `schema_version` | Contract version, currently `2.1` |
+| `schema_version` | Contract version, currently `2.2` |
 
-Chunks never span PDF pages in v0.3.1. That conservative rule keeps citations unambiguous.
+Ordinary chunks stay within a PDF page. A recovered table may span explicitly continued pages; its
+document records the complete PDF/printed page range and `metadata.source_pages`.
 
 ## Native extraction and OCR
 
@@ -170,12 +188,39 @@ OCR output is evidence, not unquestionable truth. Every OCR-derived document rec
 mean word confidence, and human-readable citations label OCR-derived passages. No PDF page or OCR
 text is sent over the network by this path.
 
+### Optional model correction
+
+Set `correction.mode` to `ocr-only` to send only Tesseract-derived page text to the configured text
+model, or `all` to review every extracted page. The default is `off`. The corrector is deliberately
+conservative:
+
+- `pages.json` and the pgvector `pages` table retain the original extraction;
+- section identifiers, numeric values, and units are protected tokens;
+- similarity and maximum length-change thresholds must pass;
+- accepted text remains labeled `model-corrected OCR`;
+- a rejected candidate leaves the raw text selected and records every rejection reason.
+
+This is text correction, not visual adjudication. The provider sees extracted text, not the PDF or
+page image. Review low-confidence and corrected pages against the authorized source before relying
+on them.
+
+## Structure and tables
+
+The generic structure pass labels headings, definitions, notes/warnings, lists, and body text.
+Tables or schedules with delimited columns are normalized to Markdown. Adjacent pages carrying the
+same `Table`/`Schedule` identifier, including `(continued)`, are joined into one page-ranged record.
+No edition-specific codebook grammar is required.
+
+This recovery is intentionally deterministic. It does not infer missing cells, read diagrams, or
+invent table geometry when extraction is ambiguous.
+
 ## PostgreSQL and pgvector
 
 The implemented pgvector adapter creates:
 
 - `corpora`, storing the source and embedding contract;
 - `documents`, storing evidence, metadata, generated `tsvector`, and `vector(1536)`;
+- `pages`, storing immutable raw text, selected text, and correction provenance;
 - an indexed foreign key from documents to corpora;
 - a composite corpus/type/page index;
 - a GIN full-text index;
@@ -189,8 +234,25 @@ Retrieval combines two candidate lists:
 1. pgvector cosine similarity;
 2. PostgreSQL `websearch_to_tsquery` full-text ranking.
 
-Reciprocal-rank fusion combines them without pretending PostgreSQL reproduces Azure AI Search's
-proprietary semantic ranker byte-for-byte.
+Reciprocal-rank fusion combines the independent lexical and vector rankings.
+
+## Answer modes
+
+`answer` is extractive by default: it returns ranked source wording and page locators without a
+generation call. `--answer-mode synthesized` is an explicit opt-in. It sends the query, retrieved
+passages, and locators to the selected text model, asks it to cite evidence labels such as `[S1]`,
+and validates those labels. Missing or unknown labels fail closed to the extractive answer.
+
+Preview that boundary without connecting:
+
+```bash
+codebook answer --plan --profile /path/profile.json \
+  --query "What training step comes first?" \
+  --answer-mode synthesized
+```
+
+Synthesis makes retrieved wording easier to learn from; it does not make the answer authoritative,
+prove that retrieval found every relevant passage, or replace the source and qualified judgment.
 
 ## Embeddings
 
@@ -332,6 +394,17 @@ Profiles contain metadata, not source extracts:
     "min_native_characters": 40,
     "timeout_seconds": 120
   },
+  "correction": {
+    "mode": "off",
+    "provider": "openai",
+    "model": "gpt-5.6-terra",
+    "min_similarity": 0.82,
+    "max_length_change_ratio": 0.2
+  },
+  "structure": {
+    "enabled": true,
+    "recover_tables": true
+  },
   "backend": "pgvector",
   "embedding": {
     "provider": "hash",
@@ -364,7 +437,7 @@ Read [docs/PROFILE_SCHEMA.md](docs/PROFILE_SCHEMA.md) for the complete contract.
 | `make export` | None | Local JSONL | Export a prior local ingest |
 | `make ingest BACKEND=pgvector` | Configured database/provider | PostgreSQL | Apply-gated indexed ingest |
 | `make search QUERY="..."` | Configured database/provider | None | Hybrid retrieval |
-| `make answer QUERY="..."` | Configured database/provider | None | Exact evidence and citations |
+| `make answer QUERY="..."` | Configured database/provider | None | Extractive by default; optional validated synthesis |
 | `make test-ocr` | Local Tesseract | Temporary generated PDF | Real image-only OCR test |
 | `make smoke` | None | Temporary directory | Synthetic local evidence test |
 | `make test-pgvector` | Disposable local database | Temporary test schema | Real integration test |
@@ -376,9 +449,14 @@ The installed CLI exposes the same controls:
 ```bash
 codebook caps --json
 codebook plan --profile /path/profile.json --pdf /path/book.pdf --backend pgvector
-codebook ingest --apply --profile /path/profile.json --pdf /path/book.pdf --backend pgvector --ocr-mode auto
+codebook ingest --apply --profile /path/profile.json --pdf /path/book.pdf \
+  --backend pgvector --ocr-mode auto --correction-mode off
 codebook search --profile /path/profile.json --query "minimum cover" --json
 codebook answer --profile /path/profile.json --query "minimum cover"
+codebook answer --plan --profile /path/profile.json --query "minimum cover" \
+  --answer-mode synthesized
+codebook answer --profile /path/profile.json --query "minimum cover" \
+  --answer-mode synthesized --generation-provider openai
 ```
 
 ## Design principles
@@ -392,30 +470,33 @@ codebook answer --profile /path/profile.json --query "minimum cover"
    user derivatives.
 5. **Capabilities are earned.** A backend is implemented only with adapter code, documentation,
    synthetic tests, and a real-service integration path.
+6. **AI should teach without hiding the evidence.** Correction and explanation are useful only
+   when the worker can inspect the original wording, provenance, and page.
 
 ## How it compares
 
 | Approach | Page evidence | Backend-neutral records | Search | Best fit |
 | --- | --- | --- | --- | --- |
-| **Elec Codebook OO v0.3.1** | Native text + local OCR, PDF + printed page | Yes | PostgreSQL hybrid | Auditable BYO-document workflows |
+| **Elec Codebook OO v0.4.0** | Native text + local OCR, PDF + printed page | Yes | PostgreSQL hybrid | Auditable BYO-document workflows |
 | One-off PDF script | Often lost | Usually no | No | Disposable extraction |
 | Hosted document assistant | Provider-dependent | Usually no | Hosted | Fast use when upload terms are acceptable |
-| Direct Azure AI Search pipeline | Schema-dependent | Possible | Managed hybrid | Existing Azure infrastructure |
 | Raw pgvector tutorial | Application-defined | Application-defined | Vector only unless extended | Learning vector SQL |
 
 ## Limitations
 
 - No protected codebook content or prebuilt index is included.
 - OCR is word-oriented Tesseract output; complex diagrams and table geometry still require review.
+- Model correction sees extracted text, not the page image, and may be rejected by safety gates.
 - Printed-page mapping is profile offset-based; generic footer/header detection is not implemented.
-- Heading detection is generic regex-based parsing, not an edition-specific NEC grammar.
-- Chunks stay within one PDF page; multi-page tables are not reconstructed into one logical table.
+- Heading/structure detection is generic and deterministic, not an edition-specific NEC grammar.
+- Only clearly labeled, delimited continued tables are joined; arbitrary layouts are not inferred.
 - `hash` embeddings are deterministic plumbing, not production semantic embeddings.
 - OpenAI embeddings are optional but are not exercised by credential-free CI.
-- Grounded answers are extractive. Generative answer synthesis is not implemented.
+- Synthesized answers validate evidence labels but cannot prove retrieval completeness or factual
+  entailment; extractive fallback remains the safety boundary.
 - The pgvector schema currently standardizes on 1,536 dimensions for compatibility with the legacy
   corpus contract.
-- Azure AI Search, LanceDB, Qdrant, and OpenSearch adapters are not implemented in this repository.
+- Azure AI Search, LanceDB, Qdrant, and OpenSearch adapters are not implemented.
 - There is no hosted service, authentication layer, or multi-user authorization model.
 
 ## Troubleshooting
@@ -448,6 +529,17 @@ Use `--ocr-mode off` only when you intentionally want native text extraction wit
 
 Start the disposable service with `make pgvector-up`, or configure a PostgreSQL database you are
 authorized to use. Do not place a production URL in a committed file.
+
+### `Set OPENAI_API_KEY`
+
+Install `.[ai]`, then set the key only in your shell or approved secret manager. It is required
+only when you explicitly select OpenAI embeddings, model correction, or synthesized answers.
+
+### A correction was rejected
+
+Inspect `pages.json` or the pgvector `pages` row. The raw extraction remains selected when protected
+tokens changed, similarity was too low, or the candidate changed length too much. Adjusting a gate
+should be a reviewed policy decision, not a way to force a preferred answer.
 
 ### `vector type not found`
 
@@ -483,8 +575,9 @@ derivatives.
 
 ### Does OCR upload my PDF?
 
-No. PDFium renders selected pages in process and Tesseract runs as a local executable. Selecting an
-external embedding provider later is a separate, explicit data-boundary decision.
+No. PDFium renders selected pages in process and Tesseract runs as a local executable. Optional
+model correction sends extracted page text—not the PDF image—to the selected provider. External
+embeddings and synthesized answers are separate, explicit data-boundary decisions.
 
 ### Is pgvector now implemented?
 
@@ -497,8 +590,10 @@ No. Azure is not imported or contacted by the implemented workflows.
 
 ### Does `answer` interpret the code?
 
-No. It returns ranked extracted wording and citations. It does not replace professional judgment or
-claim that a retrieved passage is sufficient for a field decision.
+By default, no: it returns ranked extracted wording and citations. Synthesized mode can explain or
+combine retrieved passages, but every model citation must resolve to supplied evidence or the
+command falls back to extractive output. Neither mode replaces professional judgment or proves that
+a retrieved passage is sufficient for a field decision.
 
 ### Can I change the schema for another kind of manual?
 

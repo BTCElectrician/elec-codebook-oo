@@ -24,6 +24,13 @@ Optional:
 - `ocr.page_segmentation_mode`: Tesseract PSM 0-13, default 3
 - `ocr.min_native_characters`: auto-mode threshold, default 40
 - `ocr.timeout_seconds`: per-page timeout, 1-600
+- `correction.mode`: `off`, `ocr-only`, or `all` (default `off`)
+- `correction.provider`: currently `openai`
+- `correction.model`
+- `correction.min_similarity`: 0-1, default 0.82
+- `correction.max_length_change_ratio`: 0-1, default 0.20
+- `structure.enabled`: enable generic block recovery
+- `structure.recover_tables`: join explicitly continued delimited tables
 - `embedding.provider`: `hash` or `openai`
 - `embedding.model`
 
@@ -56,6 +63,10 @@ Use `null` when no mapping is known. Non-positive results remain null.
 `ocr.mode=auto` keeps usable native PDF text and OCRs only pages below the configured alphanumeric
 character threshold. OCR is local and records `ocr-tesseract` plus mean word confidence in every
 derived document.
+
+Correction never changes the raw page record. Accepted text remains labeled with its extraction
+method plus correction provider/model; rejected candidates leave raw text selected and record the
+reasons. Structure recovery is deterministic and makes no provider call.
 
 The default is `generic-reference-template.json`. The NFPA-named profile is an optional metadata
 shape only and includes no edition data, page ranges, index names, or source content.

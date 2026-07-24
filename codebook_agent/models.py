@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-DOCUMENT_SCHEMA_VERSION = "2.1"
+DOCUMENT_SCHEMA_VERSION = "2.2"
+PAGE_SCHEMA_VERSION = "1.0"
 EMBEDDING_DIMENSIONS = 1536
 
 
@@ -18,6 +19,20 @@ class PageText:
     printed_page: int | None = None
     extraction_method: str = "native"
     extraction_confidence: float | None = None
+    raw_text: str | None = None
+    correction_status: str = "not-requested"
+    correction_provider: str | None = None
+    correction_model: str | None = None
+    correction_similarity: float | None = None
+    correction_reasons: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return both selected and immutable raw extraction evidence."""
+
+        value = asdict(self)
+        value["raw_text"] = self.raw_text if self.raw_text is not None else self.text
+        value["schema_version"] = PAGE_SCHEMA_VERSION
+        return value
 
 
 @dataclass(frozen=True)
@@ -74,15 +89,57 @@ class SearchResult:
             parts.append(f"Article {self.document.article_number}")
         if self.document.section_number:
             parts.append(f"Section {self.document.section_number}")
-        parts.append(f"PDF page {self.document.pdf_page_start}")
+        if self.document.pdf_page_end != self.document.pdf_page_start:
+            parts.append(
+                f"PDF pages {self.document.pdf_page_start}-{self.document.pdf_page_end}"
+            )
+        else:
+            parts.append(f"PDF page {self.document.pdf_page_start}")
         if self.document.printed_page_start is not None:
-            parts.append(f"printed page {self.document.printed_page_start}")
-        if self.document.metadata.get("extraction_method") == "ocr-tesseract":
+            if (
+                self.document.printed_page_end is not None
+                and self.document.printed_page_end
+                != self.document.printed_page_start
+            ):
+                parts.append(
+                    "printed pages "
+                    f"{self.document.printed_page_start}-"
+                    f"{self.document.printed_page_end}"
+                )
+            else:
+                parts.append(f"printed page {self.document.printed_page_start}")
+        page_evidence = self.document.metadata.get("page_evidence")
+        has_ocr_page = isinstance(page_evidence, list) and any(
+            isinstance(value, dict)
+            and value.get("extraction_method") == "ocr-tesseract"
+            for value in page_evidence
+        )
+        if (
+            self.document.metadata.get("extraction_method") == "ocr-tesseract"
+            or has_ocr_page
+        ):
             confidence = self.document.metadata.get("extraction_confidence")
             if isinstance(confidence, (int, float)):
                 parts.append(f"OCR confidence {confidence:.0%}")
             else:
                 parts.append("OCR-derived")
+        has_corrected_page = isinstance(page_evidence, list) and any(
+            isinstance(value, dict) and value.get("correction_status") == "accepted"
+            for value in page_evidence
+        )
+        if (
+            self.document.metadata.get("correction_status") == "accepted"
+            or has_corrected_page
+        ):
+            parts.append(
+                "model-corrected OCR"
+                if (
+                    self.document.metadata.get("extraction_method")
+                    == "ocr-tesseract"
+                    or has_ocr_page
+                )
+                else "model-corrected text"
+            )
         return ", ".join(parts)
 
     def to_dict(self) -> dict[str, Any]:

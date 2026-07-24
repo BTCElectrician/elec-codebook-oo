@@ -11,7 +11,7 @@ import pytest
 
 from codebook_agent.answers import answer_from_results
 from codebook_agent.backends.pgvector import PgVectorBackend
-from codebook_agent.core import build_documents
+from codebook_agent.core import build_bundle
 from codebook_agent.embeddings import HashEmbeddingProvider
 
 
@@ -67,7 +67,8 @@ def test_real_pgvector_ingest_hybrid_search_and_grounded_answer(tmp_path):
         "printed_page_offset": 1,
         "content_ranges": {"main": [1, 3]},
     }
-    documents = build_documents(profile, source)
+    bundle = build_bundle(profile, source)
+    documents = bundle.documents
     provider = HashEmbeddingProvider()
     embeddings = provider.embed([document.search_text for document in documents])
     backend = PgVectorBackend(database_url, schema=schema, min_pool_size=1, max_pool_size=2)
@@ -79,6 +80,7 @@ def test_real_pgvector_ingest_hybrid_search_and_grounded_answer(tmp_path):
             embeddings=embeddings,
             embedding_provider=provider.name,
             embedding_model=provider.model,
+            pages=bundle.pages,
         )
         _log("indexed", count=count)
         assert count == len(documents)
@@ -110,10 +112,25 @@ def test_real_pgvector_ingest_hybrid_search_and_grounded_answer(tmp_path):
         config = backend.corpus_config(profile["id"])
         assert config["embedding_provider"] == "hash"
         assert config["embedding_dimensions"] == 1536
+        from psycopg import sql
+
+        with backend._pool.connection() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                sql.SQL(
+                    "SELECT pdf_page, raw_text, selected_text FROM {}.pages "
+                    "WHERE corpus_id = %s ORDER BY pdf_page"
+                ).format(sql.Identifier(schema)),
+                (profile["id"],),
+            )
+            page_rows = cursor.fetchall()
+        assert len(page_rows) == 3
+        assert page_rows[1][1] == page_rows[1][2]
+        assert "twenty-four units" in page_rows[1][1]
 
         renamed_source = tmp_path / "renamed-synthetic-manual.txt"
         renamed_source.write_bytes(source.read_bytes())
-        renamed_documents = build_documents(profile, renamed_source)
+        renamed_bundle = build_bundle(profile, renamed_source)
+        renamed_documents = renamed_bundle.documents
         assert [document.id for document in renamed_documents] == [
             document.id for document in documents
         ]
@@ -123,6 +140,7 @@ def test_real_pgvector_ingest_hybrid_search_and_grounded_answer(tmp_path):
             embeddings=provider.embed([document.search_text for document in renamed_documents]),
             embedding_provider=provider.name,
             embedding_model=provider.model,
+            pages=renamed_bundle.pages,
         )
         renamed_results = backend.search(
             corpus_id=profile["id"],
@@ -143,13 +161,15 @@ def test_real_pgvector_ingest_hybrid_search_and_grounded_answer(tmp_path):
             "The fictional motor disconnect is within sight.",
             encoding="utf-8",
         )
-        revised_documents = build_documents(profile, renamed_source)
+        revised_bundle = build_bundle(profile, renamed_source)
+        revised_documents = revised_bundle.documents
         revised_count = backend.index_documents(
             profile=profile,
             documents=revised_documents,
             embeddings=provider.embed([document.search_text for document in revised_documents]),
             embedding_provider=provider.name,
             embedding_model=provider.model,
+            pages=revised_bundle.pages,
         )
         revised_query = "What is the revised training cover?"
         revised_results = backend.search(

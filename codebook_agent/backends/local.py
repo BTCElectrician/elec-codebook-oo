@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ..models import CodebookDocument
+from ..models import CodebookDocument, PageText
 
 
 def write_documents(
@@ -21,6 +21,18 @@ def write_documents(
         for document in documents
     ]
     destination.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return destination
+
+
+def write_pages(root: Path, profile_id: str, pages: list[PageText]) -> Path:
+    """Write selected and raw page evidence beside retrieval documents."""
+
+    destination = root / "local" / profile_id / "pages.json"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        json.dumps([page.to_dict() for page in pages], indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     return destination
 
 

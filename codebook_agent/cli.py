@@ -11,40 +11,52 @@ import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
-from .answers import answer_from_results
-from .backends.local import export_jsonl, write_documents
-from .core import SUPPORTED_BACKENDS, build_documents, load_profile, plan
+from .answers import answer_from_results, synthesize_answer
+from .backends.local import export_jsonl, write_documents, write_pages
+from .core import SUPPORTED_BACKENDS, build_bundle, load_profile, plan
+from .correction import CORRECTION_MODES, CorrectionConfig
 from .embeddings import build_embedding_provider, resolve_embedding_selection
 from .ocr import OCR_MODES
+from .text_models import (
+    DEFAULT_OPENAI_TEXT_MODEL,
+    TEXT_MODEL_PROVIDERS,
+    build_text_provider,
+)
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 DEFAULT_PROFILE = PACKAGE_ROOT / "profiles" / "generic-reference-template.json"
 DEFAULT_SOURCE = PACKAGE_ROOT / "data" / "synthetic_source.txt"
 
 CAPABILITIES = {
-    "schema_version": "2.1",
-    "document_schema_version": "2.1",
+    "schema_version": "2.2",
+    "document_schema_version": "2.2",
+    "page_schema_version": "1.0",
     "implemented_backends": ["local-artifacts", "pgvector"],
     "implemented_retrieval_backends": ["pgvector"],
     "implemented_embedding_providers": ["hash", "openai"],
     "implemented_ocr_engines": ["tesseract"],
-    "implemented_answer_modes": ["extractive-grounded"],
+    "implemented_ocr_correction_providers": ["openai"],
+    "implemented_text_model_providers": ["openai"],
+    "implemented_structure_recovery": ["generic-blocks", "continued-tables"],
+    "implemented_answer_modes": ["extractive-grounded", "citation-validated-synthesis"],
     "candidate_backends": ["lancedb", "qdrant", "opensearch"],
     "not_implemented": [
         "azure-ai-search",
-        "generative-answer-synthesis",
-        "model-based-ocr-cleanup",
     ],
     "commands": {
         "plan": {"network": False, "writes": False, "apply_required": False},
         "dry": {"network": False, "writes": False, "apply_required": False},
         "ingest-local": {
-            "network": False,
+            "network": ["text-model provider when correction is selected"],
             "writes": ["local artifact directory"],
             "apply_required": True,
         },
         "ingest-pgvector": {
-            "network": ["configured PostgreSQL only", "embedding provider when selected"],
+            "network": [
+                "configured PostgreSQL only",
+                "embedding provider when selected",
+                "text-model provider when correction is selected",
+            ],
             "writes": ["configured PostgreSQL only"],
             "apply_required": True,
         },
@@ -54,7 +66,11 @@ CAPABILITIES = {
             "apply_required": False,
         },
         "answer": {
-            "network": ["configured PostgreSQL only", "embedding provider when selected"],
+            "network": [
+                "configured PostgreSQL only",
+                "embedding provider when selected",
+                "text-model provider when synthesis is selected",
+            ],
             "writes": False,
             "apply_required": False,
         },
@@ -65,8 +81,8 @@ CAPABILITIES = {
         },
     },
     "data_boundary": (
-        "Bring your own authorized content. Sources, artifacts, embeddings, and indexes "
-        "are operator-owned derivatives and never belong in git."
+        "Bring your own authorized content. Sources, artifacts, embeddings, indexes, "
+        "and provider-bound text are operator-controlled derivatives and never belong in git."
     ),
 }
 
@@ -114,6 +130,14 @@ def _ocr_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--ocr-timeout-seconds", type=int)
 
 
+def _correction_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--correction-mode", choices=sorted(CORRECTION_MODES))
+    parser.add_argument("--correction-provider", choices=sorted(TEXT_MODEL_PROVIDERS))
+    parser.add_argument("--correction-model")
+    parser.add_argument("--correction-min-similarity", type=float)
+    parser.add_argument("--correction-max-length-change-ratio", type=float)
+
+
 def _retrieval_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser], name: str) -> None:
     parser = sub.add_parser(name, help=f"{name} an indexed corpus with source evidence")
     _profile_arg(parser)
@@ -144,6 +168,7 @@ def build_parser() -> argparse.ArgumentParser:
     _postgres_args(planner)
     _embedding_args(planner)
     _ocr_args(planner)
+    _correction_args(planner)
     planner.add_argument("--artifacts", type=Path, default=Path("artifacts"))
     dry = sub.add_parser("dry", help="validate the plan without writes or connections")
     _profile_arg(dry)
@@ -152,6 +177,7 @@ def build_parser() -> argparse.ArgumentParser:
     _postgres_args(dry)
     _embedding_args(dry)
     _ocr_args(dry)
+    _correction_args(dry)
     dry.add_argument("--artifacts", type=Path, default=Path("artifacts"))
     ingest = sub.add_parser("ingest", help="ingest after explicit apply")
     _profile_arg(ingest)
@@ -160,6 +186,7 @@ def build_parser() -> argparse.ArgumentParser:
     _postgres_args(ingest)
     _embedding_args(ingest)
     _ocr_args(ingest)
+    _correction_args(ingest)
     ingest.add_argument("--artifacts", type=Path, default=Path("artifacts"))
     ingest.add_argument("--apply", action="store_true", help="required to create artifacts or indexes")
     export = sub.add_parser("export", help="export local artifacts")
@@ -169,6 +196,19 @@ def build_parser() -> argparse.ArgumentParser:
     _retrieval_parser(sub, "search")
     _retrieval_parser(sub, "query")
     _retrieval_parser(sub, "answer")
+    answer = sub.choices["answer"]
+    answer.add_argument(
+        "--answer-mode",
+        choices=["extractive", "synthesized"],
+        default="extractive",
+    )
+    answer.add_argument("--generation-provider", choices=sorted(TEXT_MODEL_PROVIDERS))
+    answer.add_argument("--generation-model")
+    answer.add_argument(
+        "--plan",
+        action="store_true",
+        help="preview answer providers and data boundaries without connecting",
+    )
     clean = sub.add_parser("clean", help="remove only the specified generated artifact directory")
     clean.add_argument("--artifacts", type=Path, default=Path("artifacts"))
     sub.add_parser("smoke", help="run the synthetic local evidence workflow")
@@ -187,11 +227,12 @@ def _help() -> None:
   make export       portable local JSONL export
   make test-ocr     real local OCR test on generated image-only PDF
   make search       pgvector hybrid retrieval with source evidence
-  make answer       deterministic evidence-grounded answer
+  make answer       extractive answer; optional citation-validated synthesis
   make smoke        synthetic local evidence test
 
 PostgreSQL commands read CODEBOOK_DATABASE_URL. They never print it.
-The hash embedder is deterministic and local; OpenAI embeddings are explicit opt-in."""
+The hash embedder and extractive answers are local. OpenAI embeddings, correction,
+and synthesis are explicit opt-in and send only the documented text boundary."""
     )
 
 
@@ -237,6 +278,10 @@ def _profile_with_ingest_overrides(
 ) -> dict[str, object]:
     effective_profile = {
         **_profile_with_ocr_overrides(profile, args),
+        "correction": {
+            **dict(profile.get("correction") or {}),
+            **_correction_overrides(args),
+        },
         "backend": backend,
     }
     if backend != "pgvector":
@@ -262,6 +307,32 @@ def _ocr_overrides(args: argparse.Namespace) -> dict[str, object]:
         "timeout_seconds": getattr(args, "ocr_timeout_seconds", None),
     }
     return {key: value for key, value in overrides.items() if value is not None}
+
+
+def _correction_overrides(args: argparse.Namespace) -> dict[str, object]:
+    overrides: dict[str, object | None] = {
+        "mode": getattr(args, "correction_mode", None),
+        "provider": getattr(args, "correction_provider", None),
+        "model": getattr(args, "correction_model", None),
+        "min_similarity": getattr(args, "correction_min_similarity", None),
+        "max_length_change_ratio": getattr(
+            args,
+            "correction_max_length_change_ratio",
+            None,
+        ),
+    }
+    return {key: value for key, value in overrides.items() if value is not None}
+
+
+def _correction_provider(profile: dict[str, object]):
+    config = CorrectionConfig.from_profile(profile.get("correction"))
+    if config.mode == "off":
+        return None
+    return build_text_provider(
+        config.provider,
+        api_key=os.getenv("OPENAI_API_KEY"),
+        model=config.model,
+    )
 
 
 def _pgvector_backend(schema: str):
@@ -300,6 +371,7 @@ def command(args: argparse.Namespace) -> int:
             "writable": parent.exists() and parent.is_dir(),
             "postgres_extra": _module_available("psycopg") and _module_available("pgvector"),
             "ocr_extra": _module_available("pypdfium2"),
+            "ai_extra": _module_available("openai"),
             "tesseract": shutil.which("tesseract") is not None,
             "database_url_configured": bool(os.getenv("CODEBOOK_DATABASE_URL")),
         }
@@ -320,6 +392,7 @@ def command(args: argparse.Namespace) -> int:
             args.pdf,
             backend=args.backend,
             ocr_overrides=_ocr_overrides(args),
+            correction_overrides=_correction_overrides(args),
             artifacts=args.artifacts,
             schema=args.schema,
             embedding_provider=args.embedding_provider,
@@ -341,26 +414,68 @@ def command(args: argparse.Namespace) -> int:
             args,
             backend=selected_backend,
         )
-        documents = build_documents(effective_profile, args.pdf)
-        ocr_documents = sum(
-            document.metadata.get("extraction_method") == "ocr-tesseract"
-            for document in documents
-        )
         if selected_backend == "local-artifacts":
+            bundle = build_bundle(
+                effective_profile,
+                args.pdf,
+                correction_provider=_correction_provider(effective_profile),
+            )
+            documents = bundle.documents
+            ocr_documents = sum(
+                document.metadata.get("extraction_method") == "ocr-tesseract"
+                for document in documents
+            )
+            correction_config = CorrectionConfig.from_profile(
+                effective_profile.get("correction")
+            )
+            accepted_corrections = sum(
+                page.correction_status == "accepted" for page in bundle.pages
+            )
+            rejected_corrections = sum(
+                page.correction_status == "rejected" for page in bundle.pages
+            )
             destination = write_documents(args.artifacts, str(profile["id"]), documents)
+            pages_destination = write_pages(
+                args.artifacts,
+                str(profile["id"]),
+                bundle.pages,
+            )
             _json(
                 {
                     "operation": "local-ingest",
-                    "network": False,
+                    "network": (
+                        ["OpenAI text generation API"]
+                        if correction_config.mode != "off"
+                        else False
+                    ),
                     "documents": len(documents),
                     "ocr_documents": ocr_documents,
+                    "accepted_corrections": accepted_corrections,
+                    "rejected_corrections": rejected_corrections,
                     "artifact": str(destination),
+                    "page_evidence": str(pages_destination),
                     "source_sha256": documents[0].source_sha256,
                 }
             )
         elif selected_backend == "pgvector":
             with _pgvector_backend(args.schema) as backend:
                 backend.verify_connection()
+                bundle = build_bundle(
+                    effective_profile,
+                    args.pdf,
+                    correction_provider=_correction_provider(effective_profile),
+                )
+                documents = bundle.documents
+                ocr_documents = sum(
+                    document.metadata.get("extraction_method") == "ocr-tesseract"
+                    for document in documents
+                )
+                accepted_corrections = sum(
+                    page.correction_status == "accepted" for page in bundle.pages
+                )
+                rejected_corrections = sum(
+                    page.correction_status == "rejected" for page in bundle.pages
+                )
                 provider = _provider_for_profile(effective_profile)
                 embeddings = provider.embed(
                     [document.search_text for document in documents]
@@ -371,6 +486,7 @@ def command(args: argparse.Namespace) -> int:
                     embeddings=embeddings,
                     embedding_provider=provider.name,
                     embedding_model=provider.model,
+                    pages=bundle.pages,
                 )
             _json(
                 {
@@ -379,6 +495,8 @@ def command(args: argparse.Namespace) -> int:
                     "schema": args.schema,
                     "documents": count,
                     "ocr_documents": ocr_documents,
+                    "accepted_corrections": accepted_corrections,
+                    "rejected_corrections": rejected_corrections,
                     "embedding_provider": provider.name,
                     "embedding_model": provider.model,
                     "source_sha256": documents[0].source_sha256,
@@ -405,7 +523,62 @@ def command(args: argparse.Namespace) -> int:
             for number, result in enumerate(results, start=1):
                 print(f"{number}. {result.document.content}\n   Source: {result.citation()}")
     elif args.command == "answer":
-        answer = answer_from_results(args.query, _pgvector_search(args))
+        if args.plan:
+            profile = load_profile(args.profile)
+            provider, model = resolve_embedding_selection(profile)
+            synthesis_provider = args.generation_provider or "openai"
+            synthesis_model = args.generation_model or DEFAULT_OPENAI_TEXT_MODEL
+            _json(
+                {
+                    "operation": "answer-plan",
+                    "network": False,
+                    "writes": [],
+                    "apply": {
+                        "network": [
+                            "configured PostgreSQL",
+                            *(
+                                ["OpenAI embeddings API"]
+                                if provider == "openai"
+                                else []
+                            ),
+                            *(
+                                ["OpenAI text generation API"]
+                                if args.answer_mode == "synthesized"
+                                else []
+                            ),
+                        ],
+                        "embedding": {"provider": provider, "model": model},
+                        "answer_mode": args.answer_mode,
+                        "generation": (
+                            {
+                                "provider": synthesis_provider,
+                                "model": synthesis_model,
+                                "data_boundary": (
+                                    "query, retrieved passages, and source locators are sent "
+                                    "to the selected text-model provider"
+                                ),
+                            }
+                            if args.answer_mode == "synthesized"
+                            else None
+                        ),
+                    },
+                }
+            )
+            return 0
+        results = _pgvector_search(args)
+        if args.answer_mode == "synthesized":
+            generation_provider = build_text_provider(
+                args.generation_provider or "openai",
+                api_key=os.getenv("OPENAI_API_KEY"),
+                model=args.generation_model or DEFAULT_OPENAI_TEXT_MODEL,
+            )
+            answer = synthesize_answer(
+                args.query,
+                results,
+                provider=generation_provider,
+            )
+        else:
+            answer = answer_from_results(args.query, results)
         _json(answer.to_dict()) if args.json else print(answer.text)
     elif args.command == "clean":
         if args.artifacts.resolve().name != "artifacts":
@@ -417,15 +590,21 @@ def command(args: argparse.Namespace) -> int:
         with tempfile.TemporaryDirectory(prefix="codebook-smoke-") as temp:
             root = Path(temp) / "artifacts"
             profile = load_profile(DEFAULT_PROFILE)
-            documents = build_documents(profile, DEFAULT_SOURCE)
+            bundle = build_bundle(profile, DEFAULT_SOURCE)
+            documents = bundle.documents
             destination = write_documents(root, str(profile["id"]), documents)
+            pages_destination = write_pages(root, str(profile["id"]), bundle.pages)
             exported = export_jsonl(root, str(profile["id"]))
             exported_rows = [
                 json.loads(line)
                 for line in exported.read_text(encoding="utf-8").splitlines()
                 if line
             ]
-            if not destination.exists() or len(exported_rows) != 3:
+            if (
+                not destination.exists()
+                or not pages_destination.exists()
+                or len(exported_rows) != 3
+            ):
                 raise RuntimeError("Synthetic smoke did not produce the expected three documents.")
             if any("pdf_page_start" not in document for document in exported_rows):
                 raise RuntimeError("Synthetic smoke lost page evidence.")
@@ -458,6 +637,15 @@ def _postgres_error_types() -> tuple[type[BaseException], ...]:
     return tuple(error_types)
 
 
+def _text_provider_error_types() -> tuple[type[BaseException], ...]:
+    try:
+        import openai
+
+        return (openai.OpenAIError,)
+    except ImportError:
+        return ()
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     try:
         return command(build_parser().parse_args(argv))
@@ -476,6 +664,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(
                 "error: PostgreSQL operation failed; verify the configured "
                 "database, schema, and permissions.",
+                file=sys.stderr,
+            )
+            return 2
+        if isinstance(error, _text_provider_error_types()):
+            print(
+                "error: Text-model provider operation failed; verify the selected "
+                "provider, model, credential, and service availability.",
                 file=sys.stderr,
             )
             return 2

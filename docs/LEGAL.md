@@ -9,9 +9,11 @@ Extracted chunks, page images, JSONL, embeddings, database rows, indexes, and lo
 protected derivatives. They are ignored by git and excluded from Docker context by default. Do not
 publish a populated pgvector database or dump merely because the software is open source.
 
-Selecting an external embedding provider sends document `search_text` to that provider. Plan/dry
-shows this future data boundary without connecting; the operator remains responsible for approving
-the provider and having the rights to submit that material.
+Selecting an external embedding provider sends document `search_text` to that provider. Enabling
+model correction sends eligible extracted page text. Enabling synthesized answers sends the query,
+retrieved passages, and source locators. Plan/dry and `answer --plan` show these future boundaries
+without connecting; the operator remains responsible for approving the provider and having the
+rights to submit that material.
 
 PDF support is an optional `pypdf` extra. The OCR extra uses pypdfium2/PDFium for local rendering
 and Tesseract for local OCR; review the notices shipped by those dependencies for redistribution.
