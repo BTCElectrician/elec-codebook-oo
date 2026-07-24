@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "elec-codebook-oo"
+version = "0.1.0"
+description = "Local-first, agent-guided codebook ingestion with portable JSONL output."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Elec Codebook OO contributors" }]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+]
+dependencies = []
+
+[project.optional-dependencies]
+pdf = ["pypdf>=5.0"]
+azure = ["azure-core>=1.30", "azure-search-documents>=11.5", "azure-storage-blob>=12.20"]
+ai = ["openai>=1.0"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[project.scripts]
+codebook = "codebook_agent.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["codebook_agent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
