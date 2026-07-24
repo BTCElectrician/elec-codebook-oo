@@ -29,3 +29,25 @@ def test_extractive_answer_exposes_exact_source_and_page():
     assert "PDF page 7" in answer.text
     assert "printed page 4" in answer.text
     assert answer.to_dict()["sources"][0]["document"]["id"] == "doc-1"
+
+
+def test_citation_exposes_multi_page_range():
+    document = CodebookDocument(
+        id="table-1",
+        corpus_id="synthetic",
+        source_name="manual.txt",
+        source_sha256="abc",
+        chunk_number=1,
+        content="Synthetic table",
+        search_text="Synthetic table",
+        content_type="tables",
+        pdf_page_start=7,
+        pdf_page_end=8,
+        printed_page_start=4,
+        printed_page_end=5,
+    )
+
+    citation = SearchResult(document=document, score=0.5).citation()
+
+    assert "PDF pages 7-8" in citation
+    assert "printed pages 4-5" in citation

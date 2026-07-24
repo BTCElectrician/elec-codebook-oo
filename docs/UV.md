@@ -15,7 +15,6 @@ Extras:
 - `ocr`: pypdfium2/PDFium rendering plus Pillow; local Tesseract executable required
 - `postgres`: Psycopg pool and pgvector adaptation
 - `ai`: optional provider SDK
-- `azure`: reserved SDK dependencies; no Azure adapter is implemented
 - `dev`: pytest and Ruff
 
 The repository does not commit a lockfile yet.

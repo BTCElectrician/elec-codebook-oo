@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 import pytest
 
 from codebook_agent.backends.pgvector import PgVectorBackend
-from codebook_agent.core import build_documents
+from codebook_agent.core import build_bundle
 from codebook_agent.embeddings import HashEmbeddingProvider
 from tests.ocr_test_support import create_image_only_pdf
 
@@ -54,7 +54,8 @@ def test_image_only_pdf_is_ocrd_indexed_and_queryable(tmp_path):
             "timeout_seconds": 120,
         },
     }
-    documents = build_documents(profile, source)
+    bundle = build_bundle(profile, source)
+    documents = bundle.documents
     provider = HashEmbeddingProvider()
     backend = PgVectorBackend(database_url, schema=schema, min_pool_size=1, max_pool_size=2)
     try:
@@ -64,6 +65,7 @@ def test_image_only_pdf_is_ocrd_indexed_and_queryable(tmp_path):
             embeddings=provider.embed([document.search_text for document in documents]),
             embedding_provider=provider.name,
             embedding_model=provider.model,
+            pages=bundle.pages,
         )
         query = "What is the invented scan clearance?"
         results = backend.search(

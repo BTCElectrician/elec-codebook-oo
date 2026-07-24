@@ -47,4 +47,4 @@ def test_real_tesseract_recovers_image_only_pdf_with_provenance(tmp_path):
     assert documents
     assert all(document.metadata["extraction_method"] == "ocr-tesseract" for document in documents)
     assert all(document.metadata["extraction_confidence"] > 0.5 for document in documents)
-    assert all(document.schema_version == "2.1" for document in documents)
+    assert all(document.schema_version == "2.2" for document in documents)

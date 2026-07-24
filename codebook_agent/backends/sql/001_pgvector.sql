@@ -47,6 +47,24 @@ CREATE TABLE IF NOT EXISTS {schema}.documents (
     UNIQUE (corpus_id, chunk_number)
 );
 
+CREATE TABLE IF NOT EXISTS {schema}.pages (
+    corpus_id text NOT NULL REFERENCES {schema}.corpora(id) ON DELETE CASCADE,
+    pdf_page integer NOT NULL CHECK (pdf_page > 0),
+    printed_page integer,
+    selected_text text NOT NULL,
+    raw_text text NOT NULL,
+    extraction_method text NOT NULL,
+    extraction_confidence double precision,
+    correction_status text NOT NULL,
+    correction_provider text,
+    correction_model text,
+    correction_similarity double precision,
+    correction_reasons jsonb NOT NULL DEFAULT '[]'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (corpus_id, pdf_page)
+);
+
 CREATE INDEX IF NOT EXISTS documents_corpus_id_idx
     ON {schema}.documents (corpus_id);
 CREATE INDEX IF NOT EXISTS documents_corpus_type_page_idx
@@ -55,3 +73,5 @@ CREATE INDEX IF NOT EXISTS documents_search_vector_idx
     ON {schema}.documents USING gin (search_vector);
 CREATE INDEX IF NOT EXISTS documents_embedding_hnsw_idx
     ON {schema}.documents USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS pages_corpus_id_idx
+    ON {schema}.pages (corpus_id, pdf_page);

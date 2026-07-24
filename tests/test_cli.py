@@ -11,6 +11,11 @@ def test_caps_contract_is_truthful(capsys):
     assert payload["implemented_backends"] == ["local-artifacts", "pgvector"]
     assert payload["implemented_retrieval_backends"] == ["pgvector"]
     assert "azure-ai-search" in payload["not_implemented"]
+    assert "generative-answer-synthesis" not in payload["not_implemented"]
+    assert payload["implemented_structure_recovery"] == [
+        "generic-blocks",
+        "continued-tables",
+    ]
 
 
 def test_ingest_refuses_without_apply(tmp_path, capsys):
@@ -32,9 +37,19 @@ def test_local_ingest_and_export(tmp_path):
         for line in exported.read_text(encoding="utf-8").splitlines()
     ]
     assert len(rows) == 2
-    assert rows[0]["schema_version"] == "2.1"
+    assert rows[0]["schema_version"] == "2.2"
     assert rows[0]["pdf_page_start"] == 1
     assert rows[0]["source_sha256"]
+    page_rows = json.loads(
+        (
+            artifacts
+            / "local"
+            / "generic-reference-template"
+            / "pages.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert page_rows[0]["raw_text"] == "first\n\nsecond"
+    assert page_rows[0]["schema_version"] == "1.0"
 
 
 def test_plan_reports_effective_ocr_overrides(tmp_path, capsys):
@@ -61,6 +76,33 @@ def test_plan_reports_effective_ocr_overrides(tmp_path, capsys):
     assert payload["ocr"]["dpi"] == 400
     assert payload["ocr"]["page_segmentation_mode"] == 6
     assert payload["ocr"]["network"] is False
+
+
+def test_plan_reports_opt_in_correction_boundary(tmp_path, capsys):
+    source = tmp_path / "book.txt"
+    source.write_text("synthetic", encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "plan",
+                "--pdf",
+                str(source),
+                "--correction-mode",
+                "ocr-only",
+                "--correction-model",
+                "synthetic-corrector",
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["network"] is False
+    assert payload["apply"]["network"] == ["OpenAI text generation API"]
+    assert payload["correction"]["mode"] == "ocr-only"
+    assert payload["correction"]["model"] == "synthetic-corrector"
+    assert "eligible extracted page text" in payload["correction"]["data_boundary"]
 
 
 def test_local_plan_reports_exact_artifact_destination(tmp_path, capsys):
@@ -310,6 +352,52 @@ def test_pgvector_ingest_verifies_database_before_embedding(tmp_path, capsys, mo
     assert json.loads(capsys.readouterr().out)["operation"] == "pgvector-ingest"
 
 
+def test_synthesized_answer_plan_does_not_connect(tmp_path, capsys, monkeypatch):
+    profile = tmp_path / "profile.json"
+    profile.write_text(
+        json.dumps(
+            {
+                "id": "synthetic",
+                "title": "Synthetic",
+                "document_type": "manual",
+                "backend": "pgvector",
+                "questions": [],
+                "embedding": {"provider": "hash", "model": "codebook-hash-v1"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        cli,
+        "_pgvector_search",
+        lambda args: (_ for _ in ()).throw(AssertionError("must not connect")),
+    )
+
+    assert (
+        main(
+            [
+                "answer",
+                "--plan",
+                "--profile",
+                str(profile),
+                "--query",
+                "synthetic question",
+                "--answer-mode",
+                "synthesized",
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["network"] is False
+    assert payload["writes"] == []
+    assert payload["apply"]["answer_mode"] == "synthesized"
+    assert payload["apply"]["network"] == [
+        "configured PostgreSQL",
+        "OpenAI text generation API",
+    ]
+
+
 def test_postgres_errors_are_sanitized(capsys, monkeypatch):
     class SyntheticPostgresError(Exception):
         pass
@@ -327,6 +415,29 @@ def test_postgres_errors_are_sanitized(capsys, monkeypatch):
     error = capsys.readouterr().err
     assert "PostgreSQL operation failed" in error
     assert "secret" not in error
+
+
+def test_text_provider_errors_are_sanitized(capsys, monkeypatch):
+    class SyntheticProviderError(Exception):
+        pass
+
+    monkeypatch.setattr(
+        cli,
+        "_text_provider_error_types",
+        lambda: (SyntheticProviderError,),
+    )
+    monkeypatch.setattr(
+        cli,
+        "command",
+        lambda args: (_ for _ in ()).throw(
+            SyntheticProviderError("secret-token-value")
+        ),
+    )
+
+    assert main(["caps"]) == 2
+    error = capsys.readouterr().err
+    assert "Text-model provider operation failed" in error
+    assert "secret-token-value" not in error
 
 
 def test_clean_refuses_other_target(tmp_path, capsys):

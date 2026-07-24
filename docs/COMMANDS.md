@@ -7,12 +7,12 @@
 | `make ask` | None | None | Profile interview questions |
 | `make plan PDF=/path/book.pdf BACKEND=pgvector` | None | None | Shows exact schema/provider apply boundary |
 | `make dry PDF=/path/book.pdf BACKEND=pgvector` | None | None | Validates the same boundary without clients |
-| `make ingest BACKEND=local-artifacts` | None | Local JSON | Make supplies CLI `--apply` |
+| `make ingest BACKEND=local-artifacts` | Optional correction provider | Local JSON | Documents plus raw page evidence |
 | `make export` | None | Local JSONL | Requires local ingest |
 | `make pgvector-up` | Local Docker | Docker volume | Starts disposable pgvector |
 | `make ingest BACKEND=pgvector` | Database/provider | PostgreSQL | Atomic indexed ingest |
 | `make search QUERY="..."` | Database/provider | None | Hybrid evidence retrieval |
-| `make answer QUERY="..."` | Database/provider | None | Extractive grounded response |
+| `make answer QUERY="..."` | Database/provider | None | Extractive by default; optional validated synthesis |
 | `make test-ocr` | Local Tesseract | Temporary image-only PDF | Real OCR regression |
 | `make test-pgvector` | Local test database | Temporary schema | Mock-free real-service test |
 | `make pgvector-down` | Local Docker | Deletes Compose volume | Disposable-service teardown |
@@ -25,6 +25,14 @@ answer infer the embedding provider/model from the stored corpus contract.
 Set `OCR_MODE=off`, `auto`, or `always` on `make plan`, `make dry`, or `make ingest`. The CLI also
 accepts `--ocr-language`, `--ocr-dpi`, `--ocr-page-segmentation-mode`,
 `--ocr-min-native-characters`, and `--ocr-timeout-seconds`.
+
+Set `CORRECTION_MODE=off`, `ocr-only`, or `all`. Correction defaults to `off`; enabling it requires
+the `ai` extra and the explicitly selected provider credential. Planning reports exactly which
+extracted text boundary would leave the process.
+
+Set `ANSWER_MODE=synthesized` for optional generation. Use the CLI's `answer --plan` first to
+preview database, embedding, and generation boundaries without connecting. `GENERATION_PROVIDER`
+and `GENERATION_MODEL` override the defaults.
 
 Set `SCHEMA`, `EMBEDDING_PROVIDER`, and `EMBEDDING_MODEL` when overriding profile values. Planning
 shows the effective values and whether document `search_text` will leave the process, but it does

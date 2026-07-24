@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from importlib.resources import files
 from typing import Any, Self
 
-from ..models import EMBEDDING_DIMENSIONS, CodebookDocument, SearchResult
+from ..models import EMBEDDING_DIMENSIONS, CodebookDocument, PageText, SearchResult
 
 SCHEMA_PATTERN = re.compile(r"^[a-z_][a-z0-9_]*$")
 QUERY_WORD_PATTERN = re.compile(r"[a-z0-9]+(?:\.[a-z0-9]+)*")
@@ -166,6 +166,7 @@ class PgVectorBackend:
         embeddings: Sequence[Sequence[float]],
         embedding_provider: str,
         embedding_model: str,
+        pages: Sequence[PageText] | None = None,
     ) -> int:
         """Atomically replace one corpus, using upserts and stale-row deletion."""
 
@@ -242,6 +243,31 @@ class PgVectorBackend:
         delete_stale_query = sql.SQL(
             "DELETE FROM {}.documents WHERE corpus_id = %s AND NOT (id = ANY(%s))"
         ).format(sql.Identifier(self.schema))
+        page_query = sql.SQL(
+            """
+            INSERT INTO {}.pages (
+                corpus_id, pdf_page, printed_page, selected_text, raw_text,
+                extraction_method, extraction_confidence, correction_status,
+                correction_provider, correction_model, correction_similarity,
+                correction_reasons, updated_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+            ON CONFLICT (corpus_id, pdf_page) DO UPDATE SET
+                printed_page = excluded.printed_page,
+                selected_text = excluded.selected_text,
+                raw_text = excluded.raw_text,
+                extraction_method = excluded.extraction_method,
+                extraction_confidence = excluded.extraction_confidence,
+                correction_status = excluded.correction_status,
+                correction_provider = excluded.correction_provider,
+                correction_model = excluded.correction_model,
+                correction_similarity = excluded.correction_similarity,
+                correction_reasons = excluded.correction_reasons,
+                updated_at = now()
+            """
+        ).format(sql.Identifier(self.schema))
+        delete_stale_pages_query = sql.SQL(
+            "DELETE FROM {}.pages WHERE corpus_id = %s AND NOT (pdf_page = ANY(%s))"
+        ).format(sql.Identifier(self.schema))
 
         first = documents[0]
         with self._pool.connection() as connection, connection.cursor() as cursor:
@@ -292,6 +318,29 @@ class PgVectorBackend:
                 )
             cursor.execute(delete_stale_query, (corpus_id, [document.id for document in documents]))
             cursor.executemany(document_query, rows)
+            if pages is not None:
+                page_rows = [
+                    (
+                        corpus_id,
+                        page.pdf_page,
+                        page.printed_page,
+                        page.text,
+                        page.raw_text if page.raw_text is not None else page.text,
+                        page.extraction_method,
+                        page.extraction_confidence,
+                        page.correction_status,
+                        page.correction_provider,
+                        page.correction_model,
+                        page.correction_similarity,
+                        Jsonb(list(page.correction_reasons)),
+                    )
+                    for page in pages
+                ]
+                cursor.execute(
+                    delete_stale_pages_query,
+                    (corpus_id, [page.pdf_page for page in pages]),
+                )
+                cursor.executemany(page_query, page_rows)
         return len(documents)
 
     def search(

@@ -5,13 +5,17 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from .backends.pgvector import validate_schema_name
+from .correction import CorrectionConfig, correct_pages
 from .embeddings import resolve_embedding_selection
 from .models import DOCUMENT_SCHEMA_VERSION, CodebookDocument, PageText
 from .ocr import OCRConfig, TesseractOCR, native_text_is_usable
+from .structure import StructureConfig, recover_structure
+from .text_models import TextModelProvider
 
 SUPPORTED_BACKENDS = {"local-artifacts", "pgvector"}
 PROFILE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -50,8 +54,18 @@ def load_profile(path: Path) -> dict[str, Any]:
     if offset is not None and not isinstance(offset, int):
         raise ValueError("printed_page_offset must be an integer or null.")
     OCRConfig.from_profile(profile.get("ocr"))
+    CorrectionConfig.from_profile(profile.get("correction"))
+    StructureConfig.from_profile(profile.get("structure"))
     resolve_embedding_selection(profile)
     return profile
+
+
+@dataclass(frozen=True)
+class IngestionBundle:
+    """Raw/selected page evidence and the retrieval documents derived from it."""
+
+    pages: list[PageText]
+    documents: list[CodebookDocument]
 
 
 def plan(
@@ -60,6 +74,7 @@ def plan(
     *,
     backend: str | None = None,
     ocr_overrides: dict[str, object] | None = None,
+    correction_overrides: dict[str, object] | None = None,
     artifacts: Path = Path("artifacts"),
     schema: str = "codebook",
     embedding_provider: str | None = None,
@@ -70,6 +85,9 @@ def plan(
     ocr_config_value = dict(profile.get("ocr") or {})
     ocr_config_value.update(ocr_overrides or {})
     ocr_config = OCRConfig.from_profile(ocr_config_value)
+    correction_value = dict(profile.get("correction") or {})
+    correction_value.update(correction_overrides or {})
+    correction = CorrectionConfig.from_profile(correction_value)
     if selected_backend not in SUPPORTED_BACKENDS:
         raise ValueError(
             f"Backend '{selected_backend}' is not implemented. "
@@ -84,8 +102,13 @@ def plan(
         ).resolve()
         apply = {
             "backend": selected_backend,
-            "network": False,
-            "writes": [str(artifact)],
+            "network": (
+                ["OpenAI text generation API"] if correction.mode != "off" else False
+            ),
+            "writes": [
+                str(artifact),
+                str(artifact.with_name("pages.json")),
+            ],
             "artifact": str(artifact),
             "embedding": None,
         }
@@ -100,6 +123,8 @@ def plan(
         network = ["configured PostgreSQL"]
         if external:
             network.append("OpenAI embeddings API")
+        if correction.mode != "off":
+            network.append("OpenAI text generation API")
         apply = {
             "backend": selected_backend,
             "network": network,
@@ -126,6 +151,15 @@ def plan(
         "profile": {"id": profile["id"], "title": profile["title"], "backend": selected_backend},
         "source": {"path": str(source_path.resolve()), "exists": source_path.is_file()},
         "ocr": {**ocr_config.to_dict(), "network": False, "checked_during_plan": False},
+        "correction": {
+            **correction.to_dict(),
+            "external": correction.mode != "off",
+            "data_boundary": (
+                "eligible extracted page text is sent to the selected text-model provider"
+                if correction.mode != "off"
+                else "no extracted page text is sent to a correction provider"
+            ),
+        },
         "document_schema_version": DOCUMENT_SCHEMA_VERSION,
         "evidence": [
             "source SHA-256",
@@ -135,6 +169,8 @@ def plan(
             "section",
             "extraction method",
             "OCR confidence",
+            "raw extraction SHA-256",
+            "correction decision and model",
         ],
         "next": "Run dry for a no-write check, then request approval before ingest --apply.",
     }
@@ -272,6 +308,30 @@ def _split_paragraph(paragraph: str, max_chars: int) -> list[str]:
     return chunks
 
 
+def _split_table(table: str, max_chars: int) -> list[str]:
+    """Split a Markdown table on row boundaries while repeating its header."""
+
+    clean = table.strip()
+    if len(clean) <= max_chars:
+        return [clean] if clean else []
+    lines = clean.splitlines()
+    if len(lines) < 5:
+        return _split_paragraph(clean, max_chars)
+    prefix = lines[:4]
+    chunks: list[str] = []
+    current = list(prefix)
+    for row in lines[4:]:
+        candidate = "\n".join([*current, row])
+        if len(candidate) > max_chars and len(current) > len(prefix):
+            chunks.append("\n".join(current))
+            current = [*prefix, row]
+        else:
+            current.append(row)
+    if len(current) > len(prefix):
+        chunks.append("\n".join(current))
+    return chunks
+
+
 def _metadata_context(
     text: str,
     *,
@@ -309,6 +369,123 @@ def documents_from_pages(
     section_number: str | None = None
     section_title: str | None = None
     chunk_number = 0
+
+    structure_config = profile.get("structure")
+    if isinstance(structure_config, dict) and structure_config.get("enabled"):
+        page_by_number = {page.pdf_page: page for page in pages}
+        for block in recover_structure(profile, pages):
+            page = page_by_number[block.pdf_page_start]
+            source_page_numbers = block.metadata.get(
+                "source_pages",
+                list(range(block.pdf_page_start, block.pdf_page_end + 1)),
+            )
+            block_pages = [
+                page_by_number[number]
+                for number in source_page_numbers
+                if number in page_by_number
+            ]
+            extraction_methods = {item.extraction_method for item in block_pages}
+            correction_statuses = {item.correction_status for item in block_pages}
+            block_chunks = (
+                _split_table(block.text, max_chars)
+                if block.metadata.get("structure_kind") == "table"
+                else _split_paragraph(block.text, max_chars)
+            )
+            for chunk in block_chunks:
+                article_number, article_title, section_number, section_title = _metadata_context(
+                    chunk,
+                    article_number=article_number,
+                    article_title=article_title,
+                    section_number=section_number,
+                    section_title=section_title,
+                )
+                chunk_number += 1
+                configured_content_type = _content_type(
+                    profile,
+                    block.pdf_page_start,
+                )
+                content_type = (
+                    block.content_type
+                    if block.content_type != "main"
+                    else configured_content_type
+                )
+                context_parts = [
+                    str(profile.get("title") or ""),
+                    str(profile.get("edition") or ""),
+                    content_type,
+                    f"Article {article_number}" if article_number else "",
+                    article_title or "",
+                    f"Section {section_number}" if section_number else "",
+                    section_title or "",
+                    chunk,
+                ]
+                identity = (
+                    f"{profile['id']}:{source_hash}:{block.pdf_page_start}:"
+                    f"{block.pdf_page_end}:{chunk_number}:{chunk}"
+                ).encode()
+                metadata = {
+                    "backend": str(profile["backend"]),
+                    "extraction_method": (
+                        next(iter(extraction_methods))
+                        if len(extraction_methods) == 1
+                        else "mixed"
+                    ),
+                    "extraction_confidence": page.extraction_confidence,
+                    "correction_status": (
+                        next(iter(correction_statuses))
+                        if len(correction_statuses) == 1
+                        else "mixed"
+                    ),
+                    "correction_provider": page.correction_provider,
+                    "correction_model": page.correction_model,
+                    "correction_similarity": page.correction_similarity,
+                    "raw_text_sha256": hashlib.sha256(
+                        (page.raw_text if page.raw_text is not None else page.text).encode()
+                    ).hexdigest(),
+                    "page_evidence": [
+                        {
+                            "pdf_page": item.pdf_page,
+                            "extraction_method": item.extraction_method,
+                            "extraction_confidence": item.extraction_confidence,
+                            "correction_status": item.correction_status,
+                            "correction_provider": item.correction_provider,
+                            "correction_model": item.correction_model,
+                            "raw_text_sha256": hashlib.sha256(
+                                (
+                                    item.raw_text
+                                    if item.raw_text is not None
+                                    else item.text
+                                ).encode()
+                            ).hexdigest(),
+                        }
+                        for item in block_pages
+                    ],
+                    **block.metadata,
+                }
+                documents.append(
+                    CodebookDocument(
+                        id=f"{profile['id']}-{hashlib.sha256(identity).hexdigest()[:24]}",
+                        corpus_id=str(profile["id"]),
+                        source_name=source_path.name,
+                        source_sha256=source_hash,
+                        chunk_number=chunk_number,
+                        content=chunk,
+                        search_text="\n".join(part for part in context_parts if part),
+                        content_type=content_type,
+                        pdf_page_start=block.pdf_page_start,
+                        pdf_page_end=block.pdf_page_end,
+                        printed_page_start=block.printed_page_start,
+                        printed_page_end=block.printed_page_end,
+                        article_number=article_number,
+                        article_title=article_title,
+                        section_number=section_number,
+                        section_title=section_title,
+                        edition=str(profile["edition"]) if profile.get("edition") is not None else None,
+                        document_type=str(profile["document_type"]),
+                        metadata=metadata,
+                    )
+                )
+        return documents
 
     for page in pages:
         paragraphs = [part.strip() for part in PARAGRAPH_PATTERN.split(page.text) if part.strip()]
@@ -362,14 +539,30 @@ def documents_from_pages(
                             "backend": str(profile["backend"]),
                             "extraction_method": page.extraction_method,
                             "extraction_confidence": page.extraction_confidence,
+                            "correction_status": page.correction_status,
+                            "correction_provider": page.correction_provider,
+                            "correction_model": page.correction_model,
+                            "correction_similarity": page.correction_similarity,
+                            "raw_text_sha256": hashlib.sha256(
+                                (
+                                    page.raw_text
+                                    if page.raw_text is not None
+                                    else page.text
+                                ).encode()
+                            ).hexdigest(),
                         },
                     )
                 )
     return documents
 
 
-def build_documents(profile: dict[str, Any], source_path: Path) -> list[CodebookDocument]:
-    """Extract and shape one source under the versioned evidence contract."""
+def build_bundle(
+    profile: dict[str, Any],
+    source_path: Path,
+    *,
+    correction_provider: TextModelProvider | None = None,
+) -> IngestionBundle:
+    """Extract, optionally correct, and shape an evidence-preserving source."""
 
     source_hash = source_sha256(source_path)
     pages = extract_pages(
@@ -377,10 +570,32 @@ def build_documents(profile: dict[str, Any], source_path: Path) -> list[Codebook
         printed_page_offset=profile.get("printed_page_offset"),
         ocr=OCRConfig.from_profile(profile.get("ocr")),
     )
+    correction = CorrectionConfig.from_profile(profile.get("correction"))
+    if correction.mode != "off":
+        if correction_provider is None:
+            raise ValueError(
+                "Correction is enabled but no text-model provider was supplied."
+            )
+        pages = correct_pages(pages, provider=correction_provider, config=correction)
     documents = documents_from_pages(profile, source_path, pages, source_hash=source_hash)
     if not documents:
         raise ValueError("No extractable text was found in the source.")
-    return documents
+    return IngestionBundle(pages=pages, documents=documents)
+
+
+def build_documents(
+    profile: dict[str, Any],
+    source_path: Path,
+    *,
+    correction_provider: TextModelProvider | None = None,
+) -> list[CodebookDocument]:
+    """Compatibility helper returning documents from a full ingestion bundle."""
+
+    return build_bundle(
+        profile,
+        source_path,
+        correction_provider=correction_provider,
+    ).documents
 
 
 def make_documents(profile: dict[str, Any], source_path: Path, content: str) -> list[dict[str, Any]]:

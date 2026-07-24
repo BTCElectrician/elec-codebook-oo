@@ -22,6 +22,17 @@
     "min_native_characters": 40,
     "timeout_seconds": 120
   },
+  "correction": {
+    "mode": "off",
+    "provider": "openai",
+    "model": "gpt-5.6-terra",
+    "min_similarity": 0.82,
+    "max_length_change_ratio": 0.2
+  },
+  "structure": {
+    "enabled": true,
+    "recover_tables": true
+  },
   "backend": "local-artifacts",
   "embedding": {
     "provider": "hash",
@@ -33,6 +44,7 @@
     "Which PDF pages contain front matter, main content, definitions, tables, and annexes?",
     "How does the printed page number differ from the PDF page index?",
     "Do you want portable local artifacts or a PostgreSQL/pgvector index?",
+    "Should uncertain OCR be sent to an optional text model for correction?",
     "Where should generated derivatives be stored?"
   ]
 }

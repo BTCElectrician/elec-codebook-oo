@@ -56,7 +56,7 @@ def test_documents_preserve_page_type_and_heading_context(tmp_path):
     assert documents[1].content_type == "definitions"
     assert documents[-1].content_type == "tables"
     assert documents[-1].printed_page_start == 2
-    assert all(document.schema_version == "2.1" for document in documents)
+    assert all(document.schema_version == "2.2" for document in documents)
 
 
 def test_invalid_profile_backend_is_rejected(tmp_path):
@@ -77,4 +77,15 @@ def test_profile_id_cannot_escape_artifact_directory(tmp_path):
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="cannot contain a path separator"):
+        load_profile(path)
+
+
+def test_profile_rejects_invalid_structure_flags(tmp_path):
+    path = tmp_path / "profile.json"
+    path.write_text(
+        '{"id":"x","title":"x","document_type":"manual","backend":"local-artifacts",'
+        '"questions":[],"structure":{"enabled":"yes"}}',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="must be booleans"):
         load_profile(path)
