@@ -1,0 +1,5 @@
+Synthetic Electrical Handbook
+
+Article 1. A branch circuit is a circuit that supplies one or more outlets. This synthetic text is not a code requirement.
+
+Table 1. Training values only: a small example row contains 20 amperes and a fictional conductor label.

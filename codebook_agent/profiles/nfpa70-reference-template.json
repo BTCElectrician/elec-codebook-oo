@@ -1,0 +1,17 @@
+{
+  "id": "nfpa70-reference-template",
+  "title": "NFPA 70 reference template",
+  "edition": "replace-with-licensed-edition",
+  "document_type": "electrical-codebook",
+  "legal_use_required": true,
+  "content_ranges": {"front_matter": [], "main": [], "definitions": [], "tables": []},
+  "printed_page_offset": null,
+  "backend": "local-artifacts",
+  "questions": [
+    "Do you have the right to process this edition and PDF locally?",
+    "What is the absolute source PDF path?",
+    "Which PDF pages contain main content, definitions, tables, and appendices?",
+    "Does the printed page numbering differ from the PDF page index?",
+    "Where should local artifacts be written?"
+  ]
+}
