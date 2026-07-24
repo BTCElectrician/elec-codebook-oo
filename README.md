@@ -2,7 +2,7 @@
 
 [![Test](https://github.com/BTCElectrician/elec-codebook-oo/actions/workflows/ci.yml/badge.svg)](https://github.com/BTCElectrician/elec-codebook-oo/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
-[![Version 0.3.0](https://img.shields.io/badge/version-0.3.0-6f42c1)](pyproject.toml)
+[![Version 0.3.1](https://img.shields.io/badge/version-0.3.1-6f42c1)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **Turn an authorized codebook, specification, or technical manual into page-cited local records or
@@ -34,7 +34,7 @@ to whichever database was chosen first.
 retains source identity, PDF page, optional printed page, content type, and article/section context.
 The same records can be exported as JSONL or indexed in PostgreSQL with pgvector.
 
-| Capability | What works in v0.3 |
+| Capability | What works in v0.3.1 |
 | --- | --- |
 | Evidence-preserving ingestion | Text, Markdown, native PDF text, and local OCR remain page-local |
 | Real OCR fallback | Image-only or low-text PDF pages use local Tesseract with confidence metadata |
@@ -43,7 +43,7 @@ The same records can be exported as JSONL or indexed in PostgreSQL with pgvector
 | Hybrid retrieval | PostgreSQL full-text search plus pgvector cosine similarity |
 | Grounded answers | Deterministic extracted wording with article, section, PDF page, and printed page |
 | Neutral profiles | Generic metadata, content ranges, page offset, backend, and embedding selection |
-| Safe operations | No-write planning and explicit `--apply` before artifacts or database writes |
+| Safe operations | Exact no-write apply preview and explicit `--apply` before artifacts or database writes |
 | Real verification | Mock-free integration test against a disposable pgvector service |
 
 ## Quick example
@@ -149,12 +149,13 @@ Every `CodebookDocument` has:
 | `metadata` | JSON extension point for another manual or downstream schema |
 | `schema_version` | Contract version, currently `2.1` |
 
-Chunks never span PDF pages in v0.3. That conservative rule keeps citations unambiguous.
+Chunks never span PDF pages in v0.3.1. That conservative rule keeps citations unambiguous.
 
 ## Native extraction and OCR
 
 The old NFPA 70 ETL called its GPT text-correction phase “OCR cleaning,” but its extractor read the
-existing PDF text layer and skipped empty pages. Elec Codebook OO v0.3 adds the missing capability:
+existing PDF text layer and skipped empty pages. Elec Codebook OO v0.3 introduced the missing
+capability:
 real image OCR.
 
 `ocr.mode=auto` is the default. Native PDF text is retained when it has enough alphanumeric
@@ -197,6 +198,10 @@ proprietary semantic ranker byte-for-byte.
 The hash provider is a signed feature-hashing representation. It is useful for exact-term and
 overlap-driven local testing; it is not presented as a production semantic model. The selected
 provider and model are stored with the corpus, and queries must use that same contract.
+
+The OpenAI adapter batches document inputs while preserving result order. Pgvector ingest verifies
+the configured database before making a paid embedding request. Selecting that provider is an
+explicit data-boundary decision because document `search_text` is sent to the provider.
 
 ## Installation
 
@@ -265,8 +270,10 @@ See [docs/DOCKER.md](docs/DOCKER.md) for ports, volumes, and teardown.
 
    ```bash
    make ask PROFILE=/absolute/path/profile.json
-   make plan PROFILE=/absolute/path/profile.json PDF=/absolute/path/book.pdf BACKEND=pgvector
-   make dry PROFILE=/absolute/path/profile.json PDF=/absolute/path/book.pdf BACKEND=pgvector
+   make plan PROFILE=/absolute/path/profile.json PDF=/absolute/path/book.pdf \
+     BACKEND=pgvector SCHEMA=codebook
+   make dry PROFILE=/absolute/path/profile.json PDF=/absolute/path/book.pdf \
+     BACKEND=pgvector SCHEMA=codebook
    ```
 
 5. Start or select a non-production PostgreSQL database with pgvector.
@@ -286,8 +293,11 @@ See [docs/DOCKER.md](docs/DOCKER.md) for ports, volumes, and teardown.
    make answer PROFILE=/absolute/path/profile.json QUERY="What does Section 3.1 require?"
    ```
 
-PostgreSQL commands read `CODEBOOK_DATABASE_URL` and never print its value. The Makefile's default
-URL is only for the disposable local Compose service.
+`plan` and `dry` display the exact local artifact path or PostgreSQL schema plus the effective
+embedding provider, model, and future network/data boundary. They do not read the database URL,
+connect, write, or construct a provider client. PostgreSQL apply commands read
+`CODEBOOK_DATABASE_URL` and never print its value. The Makefile's default URL is only for the
+disposable local Compose service.
 
 ## Profile configuration
 
@@ -344,8 +354,8 @@ Read [docs/PROFILE_SCHEMA.md](docs/PROFILE_SCHEMA.md) for the complete contract.
 | `make doctor` | None | None | Check Python, optional extras, and local paths |
 | `make caps-json` | None | None | Machine-readable capability and safety contract |
 | `make ask` | None | None | Print profile onboarding questions |
-| `make plan` | None | None | Resolve source, backend, writes, and evidence contract |
-| `make dry` | None | None | Validate the plan |
+| `make plan` | None | None | Preview exact apply destination, provider boundary, and evidence contract |
+| `make dry` | None | None | Validate the same apply configuration without clients or writes |
 | `make ingest BACKEND=local-artifacts` | None | Local JSON | Apply-gated local ingest |
 | `make export` | None | Local JSONL | Export a prior local ingest |
 | `make ingest BACKEND=pgvector` | Configured database/provider | PostgreSQL | Apply-gated indexed ingest |
@@ -383,7 +393,7 @@ codebook answer --profile /path/profile.json --query "minimum cover"
 
 | Approach | Page evidence | Backend-neutral records | Search | Best fit |
 | --- | --- | --- | --- | --- |
-| **Elec Codebook OO v0.3** | Native text + local OCR, PDF + printed page | Yes | PostgreSQL hybrid | Auditable BYO-document workflows |
+| **Elec Codebook OO v0.3.1** | Native text + local OCR, PDF + printed page | Yes | PostgreSQL hybrid | Auditable BYO-document workflows |
 | One-off PDF script | Often lost | Usually no | No | Disposable extraction |
 | Hosted document assistant | Provider-dependent | Usually no | Hosted | Fast use when upload terms are acceptable |
 | Direct Azure AI Search pipeline | Schema-dependent | Possible | Managed hybrid | Existing Azure infrastructure |
@@ -493,7 +503,9 @@ the stable evidence fields requires a new document schema version and database m
 
 ### Do planning commands connect to PostgreSQL?
 
-No. `plan`, `dry`, `ask`, and `caps` are no-connection and no-write commands.
+No. `plan`, `dry`, `ask`, and `caps` are no-connection and no-write commands. Planning resolves
+and displays the destination, schema, embedding contract, and future data boundary without reading
+the database URL or constructing a provider client.
 
 ## About contributions
 

@@ -111,7 +111,29 @@ def test_real_pgvector_ingest_hybrid_search_and_grounded_answer(tmp_path):
         assert config["embedding_provider"] == "hash"
         assert config["embedding_dimensions"] == 1536
 
-        source.write_text(
+        renamed_source = tmp_path / "renamed-synthetic-manual.txt"
+        renamed_source.write_bytes(source.read_bytes())
+        renamed_documents = build_documents(profile, renamed_source)
+        assert [document.id for document in renamed_documents] == [
+            document.id for document in documents
+        ]
+        backend.index_documents(
+            profile=profile,
+            documents=renamed_documents,
+            embeddings=provider.embed([document.search_text for document in renamed_documents]),
+            embedding_provider=provider.name,
+            embedding_model=provider.model,
+        )
+        renamed_results = backend.search(
+            corpus_id=profile["id"],
+            query=query,
+            query_embedding=provider.embed([query])[0],
+            limit=3,
+        )
+        assert renamed_results[0].document.source_name == renamed_source.name
+        assert renamed_source.name in renamed_results[0].citation()
+
+        renamed_source.write_text(
             "Synthetic Field Manual\f"
             "Article 3. Underground Training\n\n"
             "3.1 Minimum Cover\n\n"
@@ -121,7 +143,7 @@ def test_real_pgvector_ingest_hybrid_search_and_grounded_answer(tmp_path):
             "The fictional motor disconnect is within sight.",
             encoding="utf-8",
         )
-        revised_documents = build_documents(profile, source)
+        revised_documents = build_documents(profile, renamed_source)
         revised_count = backend.index_documents(
             profile=profile,
             documents=revised_documents,

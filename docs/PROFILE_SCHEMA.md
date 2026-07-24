@@ -27,6 +27,10 @@ Optional:
 - `embedding.provider`: `hash` or `openai`
 - `embedding.model`
 
+Embedding configuration is validated during profile loading and planning without importing a
+provider SDK or creating a client. The hash provider accepts only `codebook-hash-v1`; OpenAI model
+names are operator-selected. Plan/dry reports whether the effective provider is external.
+
 `content_ranges` maps type names to page ranges. Supported shapes are:
 
 ```json

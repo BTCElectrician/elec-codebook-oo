@@ -14,7 +14,7 @@ from pathlib import Path
 from .answers import answer_from_results
 from .backends.local import export_jsonl, write_documents
 from .core import SUPPORTED_BACKENDS, build_documents, load_profile, plan
-from .embeddings import build_embedding_provider
+from .embeddings import build_embedding_provider, resolve_embedding_selection
 from .ocr import OCR_MODES
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -141,12 +141,18 @@ def build_parser() -> argparse.ArgumentParser:
     _profile_arg(planner)
     _source_arg(planner)
     _backend_arg(planner)
+    _postgres_args(planner)
+    _embedding_args(planner)
     _ocr_args(planner)
+    planner.add_argument("--artifacts", type=Path, default=Path("artifacts"))
     dry = sub.add_parser("dry", help="validate the plan without writes or connections")
     _profile_arg(dry)
     _source_arg(dry)
     _backend_arg(dry)
+    _postgres_args(dry)
+    _embedding_args(dry)
     _ocr_args(dry)
+    dry.add_argument("--artifacts", type=Path, default=Path("artifacts"))
     ingest = sub.add_parser("ingest", help="ingest after explicit apply")
     _profile_arg(ingest)
     _source_arg(ingest)
@@ -196,30 +202,13 @@ def _database_url() -> str:
     return value
 
 
-def _embedding_selection(
-    profile: dict[str, object],
-    *,
-    provider_override: str | None = None,
-    model_override: str | None = None,
-) -> tuple[str, str | None]:
-    config = profile.get("embedding")
-    configured_provider = None
-    configured_model = None
-    if isinstance(config, dict):
-        configured_provider = config.get("provider")
-        configured_model = config.get("model")
-    provider = provider_override or str(configured_provider or "hash")
-    model = model_override or (str(configured_model) if configured_model else None)
-    return provider, model
-
-
 def _provider_for_profile(
     profile: dict[str, object],
     *,
     provider_override: str | None = None,
     model_override: str | None = None,
 ):
-    provider_name, model = _embedding_selection(
+    provider_name, model = resolve_embedding_selection(
         profile,
         provider_override=provider_override,
         model_override=model_override,
@@ -238,6 +227,29 @@ def _profile_with_ocr_overrides(
     ocr = dict(profile.get("ocr") or {})
     ocr.update(_ocr_overrides(args))
     return {**profile, "ocr": ocr}
+
+
+def _profile_with_ingest_overrides(
+    profile: dict[str, object],
+    args: argparse.Namespace,
+    *,
+    backend: str,
+) -> dict[str, object]:
+    effective_profile = {
+        **_profile_with_ocr_overrides(profile, args),
+        "backend": backend,
+    }
+    if backend != "pgvector":
+        return effective_profile
+    provider, model = resolve_embedding_selection(
+        profile,
+        provider_override=args.embedding_provider,
+        model_override=args.embedding_model,
+    )
+    return {
+        **effective_profile,
+        "embedding": {"provider": provider, "model": model},
+    }
 
 
 def _ocr_overrides(args: argparse.Namespace) -> dict[str, object]:
@@ -308,6 +320,10 @@ def command(args: argparse.Namespace) -> int:
             args.pdf,
             backend=args.backend,
             ocr_overrides=_ocr_overrides(args),
+            artifacts=args.artifacts,
+            schema=args.schema,
+            embedding_provider=args.embedding_provider,
+            embedding_model=args.embedding_model,
         )
         if not result["source"]["exists"]:
             raise FileNotFoundError(f"Source not found: {args.pdf}")
@@ -320,10 +336,11 @@ def command(args: argparse.Namespace) -> int:
         selected_backend = args.backend or profile["backend"]
         if not args.pdf.is_file():
             raise FileNotFoundError(f"Source not found: {args.pdf}")
-        effective_profile = {
-            **_profile_with_ocr_overrides(profile, args),
-            "backend": selected_backend,
-        }
+        effective_profile = _profile_with_ingest_overrides(
+            profile,
+            args,
+            backend=selected_backend,
+        )
         documents = build_documents(effective_profile, args.pdf)
         ocr_documents = sum(
             document.metadata.get("extraction_method") == "ocr-tesseract"
@@ -342,13 +359,12 @@ def command(args: argparse.Namespace) -> int:
                 }
             )
         elif selected_backend == "pgvector":
-            provider = _provider_for_profile(
-                profile,
-                provider_override=args.embedding_provider,
-                model_override=args.embedding_model,
-            )
-            embeddings = provider.embed([document.search_text for document in documents])
             with _pgvector_backend(args.schema) as backend:
+                backend.verify_connection()
+                provider = _provider_for_profile(effective_profile)
+                embeddings = provider.embed(
+                    [document.search_text for document in documents]
+                )
                 count = backend.index_documents(
                     profile=effective_profile,
                     documents=documents,
@@ -425,6 +441,23 @@ def _module_available(name: str) -> bool:
     return True
 
 
+def _postgres_error_types() -> tuple[type[BaseException], ...]:
+    error_types: list[type[BaseException]] = []
+    try:
+        import psycopg
+
+        error_types.append(psycopg.Error)
+    except ImportError:
+        pass
+    try:
+        from psycopg_pool import PoolTimeout
+
+        error_types.append(PoolTimeout)
+    except ImportError:
+        pass
+    return tuple(error_types)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     try:
         return command(build_parser().parse_args(argv))
@@ -438,6 +471,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     ) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
+    except Exception as error:
+        if isinstance(error, _postgres_error_types()):
+            print(
+                "error: PostgreSQL operation failed; verify the configured "
+                "database, schema, and permissions.",
+                file=sys.stderr,
+            )
+            return 2
+        raise
 
 
 if __name__ == "__main__":

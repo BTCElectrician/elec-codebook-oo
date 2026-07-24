@@ -64,6 +64,14 @@ def _full_text_query(query: str) -> str:
     return " OR ".join(f'"{term}"' for term in dict.fromkeys(terms))
 
 
+def validate_schema_name(schema: str) -> str:
+    """Validate a PostgreSQL schema name without connecting to PostgreSQL."""
+
+    if not SCHEMA_PATTERN.fullmatch(schema):
+        raise ValueError("Schema names must use lowercase letters, digits, and underscores.")
+    return schema
+
+
 class PgVectorBackend:
     """Atomic corpus indexing and hybrid vector/full-text retrieval."""
 
@@ -77,8 +85,7 @@ class PgVectorBackend:
     ) -> None:
         if not database_url:
             raise ValueError("A PostgreSQL database URL is required.")
-        if not SCHEMA_PATTERN.fullmatch(schema):
-            raise ValueError("Schema names must use lowercase letters, digits, and underscores.")
+        validate_schema_name(schema)
         _, _, _, _, connection_pool = _postgres_imports()
         self.schema = schema
         self._pool = connection_pool(
@@ -97,6 +104,13 @@ class PgVectorBackend:
 
     def close(self) -> None:
         self._pool.close()
+
+    def verify_connection(self) -> None:
+        """Verify the configured database before any paid provider work."""
+
+        with self._pool.connection() as connection, connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
 
     def ensure_schema(self) -> None:
         """Apply the idempotent schema migration."""
@@ -202,6 +216,9 @@ class PgVectorBackend:
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()
             )
             ON CONFLICT (id) DO UPDATE SET
+                source_name = excluded.source_name,
+                source_sha256 = excluded.source_sha256,
+                chunk_number = excluded.chunk_number,
                 content = excluded.content,
                 search_text = excluded.search_text,
                 content_type = excluded.content_type,

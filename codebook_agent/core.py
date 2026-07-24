@@ -8,6 +8,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .backends.pgvector import validate_schema_name
+from .embeddings import resolve_embedding_selection
 from .models import DOCUMENT_SCHEMA_VERSION, CodebookDocument, PageText
 from .ocr import OCRConfig, TesseractOCR, native_text_is_usable
 
@@ -48,6 +50,7 @@ def load_profile(path: Path) -> dict[str, Any]:
     if offset is not None and not isinstance(offset, int):
         raise ValueError("printed_page_offset must be an integer or null.")
     OCRConfig.from_profile(profile.get("ocr"))
+    resolve_embedding_selection(profile)
     return profile
 
 
@@ -57,6 +60,10 @@ def plan(
     *,
     backend: str | None = None,
     ocr_overrides: dict[str, object] | None = None,
+    artifacts: Path = Path("artifacts"),
+    schema: str = "codebook",
+    embedding_provider: str | None = None,
+    embedding_model: str | None = None,
 ) -> dict[str, Any]:
     profile = load_profile(profile_path)
     selected_backend = backend or profile["backend"]
@@ -68,15 +75,54 @@ def plan(
             f"Backend '{selected_backend}' is not implemented. "
             f"Choose one of: {', '.join(sorted(SUPPORTED_BACKENDS))}."
         )
+    if selected_backend == "local-artifacts":
+        artifact = (
+            artifacts
+            / "local"
+            / str(profile["id"])
+            / "documents.json"
+        ).resolve()
+        apply = {
+            "backend": selected_backend,
+            "network": False,
+            "writes": [str(artifact)],
+            "artifact": str(artifact),
+            "embedding": None,
+        }
+    else:
+        validate_schema_name(schema)
+        provider, model = resolve_embedding_selection(
+            profile,
+            provider_override=embedding_provider,
+            model_override=embedding_model,
+        )
+        external = provider == "openai"
+        network = ["configured PostgreSQL"]
+        if external:
+            network.append("OpenAI embeddings API")
+        apply = {
+            "backend": selected_backend,
+            "network": network,
+            "writes": [f"configured PostgreSQL schema: {schema}"],
+            "database": "configured CODEBOOK_DATABASE_URL",
+            "schema": schema,
+            "embedding": {
+                "provider": provider,
+                "model": model,
+                "external": external,
+                "data_boundary": (
+                    "document search_text is sent to the selected provider"
+                    if external
+                    else "document search_text remains local"
+                ),
+            },
+        }
     return {
         "operation": "codebook-plan",
         "network": False,
         "writes": [],
-        "apply_writes": (
-            ["local artifact directory"]
-            if selected_backend == "local-artifacts"
-            else ["PostgreSQL codebook schema"]
-        ),
+        "apply_writes": apply["writes"],
+        "apply": apply,
         "profile": {"id": profile["id"], "title": profile["title"], "backend": selected_backend},
         "source": {"path": str(source_path.resolve()), "exists": source_path.is_file()},
         "ocr": {**ocr_config.to_dict(), "network": False, "checked_during_plan": False},
@@ -137,7 +183,11 @@ def extract_pages(
                     min_characters=ocr_config.min_native_characters,
                 )
             ]
-            ocr_results = TesseractOCR(ocr_config).extract_pages(source_path, ocr_pages)
+            ocr_results = (
+                TesseractOCR(ocr_config).extract_pages(source_path, ocr_pages)
+                if ocr_pages
+                else {}
+            )
             for pdf_page, result in ocr_results.items():
                 if result.text.strip():
                     raw_pages[pdf_page - 1] = result.text

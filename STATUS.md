@@ -2,14 +2,14 @@
 
 ## Current state
 
-Version 0.3 implements evidence-preserving ingestion, real local OCR fallback, and a
+Version 0.3.1 implements evidence-preserving ingestion, real local OCR fallback, and a
 backend-neutral retrieval contract.
 Local JSON/JSONL remains the default. PostgreSQL/pgvector is the implemented searchable backend.
 
 ## Implemented
 
 - Generic metadata-only profile and optional NFPA reference profile
-- No-write/no-connection plan and dry-run
+- No-write/no-connection plan and dry-run with exact apply destination and provider boundary
 - Page-preserving text, Markdown, and optional pypdf extraction
 - Automatic local PDFium rendering plus Tesseract OCR for low-text/image-only pages
 - Per-document extraction method and OCR confidence provenance
@@ -17,11 +17,12 @@ Local JSON/JSONL remains the default. PostgreSQL/pgvector is the implemented sea
 - Versioned `CodebookDocument` and `SearchResult` contracts
 - Local JSON and JSONL
 - Deterministic hash embeddings for offline plumbing/tests
-- Optional OpenAI 1,536-dimension embedding adapter
+- Optional batched OpenAI 1,536-dimension embedding adapter
 - PostgreSQL migration, atomic upserts, stale cleanup, GIN full-text, HNSW vectors
 - Hybrid reciprocal-rank-fusion retrieval
 - Search/query CLI and deterministic evidence-grounded answers
 - Mock-free disposable pgvector integration test with production guards
+- Quote-safe Tesseract TSV parsing and same-content source-rename provenance refresh
 
 ## Not implemented
 
