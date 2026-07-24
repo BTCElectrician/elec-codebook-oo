@@ -6,7 +6,9 @@
   "legal_use_required": true,
   "content_ranges": {"front_matter": [], "main": [], "definitions": [], "tables": []},
   "printed_page_offset": null,
+  "max_chunk_chars": 1800,
   "backend": "local-artifacts",
+  "embedding": {"provider": "hash", "model": "codebook-hash-v1"},
   "questions": [
     "Do you have the right to process this edition and PDF locally?",
     "What is the absolute source PDF path?",

@@ -5,6 +5,10 @@ You are responsible for confirming that your intended local processing is permit
 source content to a provider unless you independently approve that provider and have the rights to
 do so. The repository includes only invented synthetic text.
 
-Extracted chunks, page images, JSONL, embeddings, and local artifacts can be protected derivatives.
-They are ignored by git and excluded from Docker context by default. PDF support is an optional
-`pypdf` extra; no copyleft/commercial-risk PDF engine is required by the base package.
+Extracted chunks, page images, JSONL, embeddings, database rows, indexes, and local artifacts can be
+protected derivatives. They are ignored by git and excluded from Docker context by default. Do not
+publish a populated pgvector database or dump merely because the software is open source.
+
+PDF support is an optional `pypdf` extra; no copyleft/commercial-risk PDF engine is required by the
+base package. References to NEC/NFPA 70 describe engineering lessons and an optional profile shape,
+not affiliation, endorsement, permission, or bundled source material.

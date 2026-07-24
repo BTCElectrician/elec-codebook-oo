@@ -5,7 +5,6 @@ from __future__ import annotations
 import subprocess
 import sys
 
-
 FORBIDDEN_PREFIXES = ("artifacts/", "output/", "cache/", "staged_blobs/", "page_images/")
 FORBIDDEN_NAMES = {".env"}
 FORBIDDEN_SUFFIXES = (".pdf", ".jsonl")

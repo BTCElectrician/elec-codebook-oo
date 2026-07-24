@@ -1,12 +1,20 @@
 # Python environments
 
-The project has no required runtime dependencies. Use any Python 3.11+ environment. For testing:
+The base install has no mandatory provider SDK. Use Python 3.11 or newer.
 
 ```bash
-python -m pip install -e '.[dev]'
+uv venv
+source .venv/bin/activate
+uv pip install -e '.[dev,pdf,postgres]'
 make check
 ```
 
-For PDF extraction, opt in explicitly: `python -m pip install -e '.[pdf]'`. `pypdf` is optional so
-the base package remains small and provider-free. A future lockfile may be added when the dependency
-groups stabilize.
+Extras:
+
+- `pdf`: pypdf
+- `postgres`: Psycopg pool and pgvector adaptation
+- `ai`: optional provider SDK
+- `azure`: reserved SDK dependencies; no Azure adapter is implemented
+- `dev`: pytest and Ruff
+
+The repository does not commit a lockfile yet.
