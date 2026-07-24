@@ -1,4 +1,4 @@
-"""Fail if tracked filenames look like user content or credentials."""
+"""Fail if tracked or unignored filenames look like user content or credentials."""
 
 from __future__ import annotations
 
@@ -22,13 +22,22 @@ def is_forbidden(path: str) -> bool:
 
 
 def main() -> int:
-    tracked = subprocess.check_output(["git", "ls-files"], text=True).splitlines()
-    violations = [path for path in tracked if is_forbidden(path)]
+    candidates = subprocess.check_output(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+        text=True,
+    ).splitlines()
+    violations = [path for path in candidates if is_forbidden(path)]
     if violations:
-        print("Tracked user-content or credential-like files are forbidden:", file=sys.stderr)
+        print(
+            "Tracked or unignored user-content and credential-like files are forbidden:",
+            file=sys.stderr,
+        )
         print("\n".join(violations), file=sys.stderr)
         return 1
-    print("Leak guard passed: no tracked artifacts, PDFs, JSONL exports, or .env files.")
+    print(
+        "Leak guard passed: no tracked or unignored artifacts, PDFs, "
+        "JSONL exports, or .env files."
+    )
     return 0
 
 

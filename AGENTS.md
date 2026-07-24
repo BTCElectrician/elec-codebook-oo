@@ -1,6 +1,11 @@
 # Agent operating guide
 
-Start by reading `STATUS.md`, then run `make help`, `make doctor`, and `make caps-json`.
+This file is the canonical repository authority for every coding agent. Vendor-specific entry
+files may point here; they do not replace it.
+
+Start by reading `STATUS.md` and `docs/CODEMAP.md`, then run `make agent-json`. Use `make help`,
+`make doctor`, and `make caps-json` for narrower discovery. These commands do not connect, call a
+provider, or write project artifacts.
 
 This repository processes only content the operator is authorized to use. Never add source PDFs,
 extracted text, page images, chunks, exports, `artifacts/`, credentials, or a user's `.env` to git.
@@ -23,5 +28,11 @@ the provider/model and acceptance decision, and reject changes to protected iden
 must use retrieved evidence labels and fall back to extractive output when citation validation
 fails.
 
-Before commits, inspect `git status` and run `git diff --check`. Treat generated run output as
+For code changes, use `docs/CODEMAP.md` to find the owning contract and focused tests. Keep
+machine-readable data on stdout and warnings/errors on stderr. Preserve the documented exit-code
+meanings and update `codebook_agent/agent_contract.py` when commands, outputs, capabilities, or
+entry points change.
+
+Before commits, inspect `git status`, run focused tests, `make check`, and `git diff --check`.
+Update `STATUS.md` when current implementation truth changes. Treat generated run output as
 disposable user content, not repository input.

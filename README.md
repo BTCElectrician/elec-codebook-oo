@@ -6,7 +6,7 @@
 
 [![Test](https://github.com/BTCElectrician/elec-codebook-oo/actions/workflows/ci.yml/badge.svg)](https://github.com/BTCElectrician/elec-codebook-oo/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
-[![Version 0.4.0](https://img.shields.io/badge/version-0.4.0-6f42c1)](pyproject.toml)
+[![Version 0.5.0](https://img.shields.io/badge/version-0.5.0-6f42c1)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **Turn an authorized codebook, specification, or technical manual into page-cited local records or
@@ -28,6 +28,41 @@ make doctor
 There is no supported curl installer or published package release yet. Install from source with pip
 or uv.
 
+## Built for developers and coding agents
+
+You can point a coding agent at this repository without first teaching it the
+project's private vocabulary. The repo provides three things:
+
+- **Map:** [`AGENTS.md`](AGENTS.md) defines authority,
+  [`STATUS.md`](STATUS.md) states current truth, and
+  [`docs/CODEMAP.md`](docs/CODEMAP.md) maps each kind of change to its owner,
+  focused tests, and invariants.
+- **Motorway:** one canonical evidence flow and deterministic JSON contracts
+  let an agent move quickly from intent to the relevant boundary.
+- **Guarded exits:** plans show exact destinations and provider boundaries;
+  writes and destructive cleanup stop at an explicit apply gate.
+
+Start with one side-effect-free command:
+
+```bash
+make agent-json
+```
+
+It reports local health, entry points, workflows, and recommended next actions.
+It also gives the receiving model a conversation contract: accept ordinary
+language, lead with verified state, distinguish implemented from candidate
+behavior, and offer the useful next choice—understand, explain, change, run, or
+verify.
+Use `codebook capabilities --json` for the full command/environment/exit-code
+contract, `codebook schema --json` for output shapes, and
+`codebook help <command>` for exact flags.
+
+Codex/ChatGPT-style agents enter through `AGENTS.md`; Claude Code, Gemini CLI,
+and GitHub Copilot receive thin adapters that point to the same authority.
+Other tools can start from this README or
+[`docs/AGENT_ONBOARDING.md`](docs/AGENT_ONBOARDING.md). No vendor-specific file
+owns project truth.
+
 ## TL;DR
 
 **The problem:** Basic PDF-to-text scripts discard the evidence needed for trustworthy retrieval.
@@ -43,7 +78,7 @@ authorized manual, inspect how it was processed, search it in ordinary language,
 answer back to wording and pages you can verify. AI is optional assistance around the source—not a
 replacement for the book, training, or field judgment.
 
-| Capability | What works in v0.4.0 |
+| Capability | What works in v0.5.0 |
 | --- | --- |
 | Evidence-preserving ingestion | Text, Markdown, native PDF text, and local OCR remain page-local |
 | Real OCR fallback | Image-only or low-text PDF pages use local Tesseract with confidence metadata |
@@ -62,6 +97,7 @@ replacement for the book, training, or field judgment.
 The bundled source is invented and safe to use:
 
 ```bash
+make agent-json
 make caps-json
 make plan
 make dry
@@ -428,6 +464,9 @@ Read [docs/PROFILE_SCHEMA.md](docs/PROFILE_SCHEMA.md) for the complete contract.
 | Command | Connections | Writes | Purpose |
 | --- | --- | --- | --- |
 | `make help` | None | None | Show the command map |
+| `make agent-json` | None | None | One-call orientation, health, workflows, and next actions |
+| `make robot-docs` | None | None | Paste-ready compact guide for another agent |
+| `make schemas-json` | None | None | Describe stable machine-output shapes |
 | `make doctor` | None | None | Check Python, optional extras, and local paths |
 | `make caps-json` | None | None | Machine-readable capability and safety contract |
 | `make ask` | None | None | Print profile onboarding questions |
@@ -442,11 +481,16 @@ Read [docs/PROFILE_SCHEMA.md](docs/PROFILE_SCHEMA.md) for the complete contract.
 | `make smoke` | None | Temporary directory | Synthetic local evidence test |
 | `make test-pgvector` | Disposable local database | Temporary test schema | Real integration test |
 | `make check` | None by default | Test caches | Lint, unit tests, smoke, leak guard |
-| `make clean` | None | Deletes selected `artifacts/` only | Remove generated local artifacts |
+| `make clean` | None | None | Preview the resolved generated-artifact target |
+| `make clean-apply` | None | Deletes selected `artifacts/` only | Apply the reviewed cleanup |
 
 The installed CLI exposes the same controls:
 
 ```bash
+codebook agent --json
+codebook help plan
+codebook capabilities --json
+codebook schema --json
 codebook caps --json
 codebook plan --profile /path/profile.json --pdf /path/book.pdf --backend pgvector
 codebook ingest --apply --profile /path/profile.json --pdf /path/book.pdf \
@@ -472,12 +516,14 @@ codebook answer --profile /path/profile.json --query "minimum cover" \
    synthetic tests, and a real-service integration path.
 6. **AI should teach without hiding the evidence.** Correction and explanation are useful only
    when the worker can inspect the original wording, provenance, and page.
+7. **Agent navigability is part of the interface.** Authority, current state, change ownership,
+   output schemas, safety gates, and the next valid action must be discoverable without guessing.
 
 ## How it compares
 
 | Approach | Page evidence | Backend-neutral records | Search | Best fit |
 | --- | --- | --- | --- | --- |
-| **Elec Codebook OO v0.4.0** | Native text + local OCR, PDF + printed page | Yes | PostgreSQL hybrid | Auditable BYO-document workflows |
+| **Elec Codebook OO v0.5.0** | Native text + local OCR, PDF + printed page | Yes | PostgreSQL hybrid | Auditable BYO-document workflows |
 | One-off PDF script | Often lost | Usually no | No | Disposable extraction |
 | Hosted document assistant | Provider-dependent | Usually no | Hosted | Fast use when upload terms are acceptable |
 | Raw pgvector tutorial | Application-defined | Application-defined | Vector only unless extended | Learning vector SQL |
@@ -558,7 +604,8 @@ Set `printed_page_offset`. The formula is `printed page = PDF page - offset`.
 
 ### Leak guard failure
 
-Remove the tracked PDF, extract, page image, JSONL, artifact, embedding dump, or `.env`. Use invented
+Remove or ignore the tracked/unignored PDF, extract, page image, JSONL, artifact, embedding dump,
+or `.env`. Use invented
 fixtures in tests and issues.
 
 ## FAQ
