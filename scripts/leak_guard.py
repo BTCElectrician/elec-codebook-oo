@@ -4,21 +4,26 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import PurePosixPath
 
-FORBIDDEN_PREFIXES = ("artifacts/", "output/", "cache/", "staged_blobs/", "page_images/")
-FORBIDDEN_NAMES = {".env"}
+FORBIDDEN_DIRECTORY_NAMES = {"artifacts", "output", "cache", "staged_blobs", "page_images"}
 FORBIDDEN_SUFFIXES = (".pdf", ".jsonl")
+
+
+def is_forbidden(path: str) -> bool:
+    candidate = PurePosixPath(path)
+    name = candidate.name.lower()
+    return (
+        name == ".env"
+        or (name.startswith(".env.") and name != ".env.example")
+        or any(part.lower() in FORBIDDEN_DIRECTORY_NAMES for part in candidate.parts[:-1])
+        or name.endswith(FORBIDDEN_SUFFIXES)
+    )
 
 
 def main() -> int:
     tracked = subprocess.check_output(["git", "ls-files"], text=True).splitlines()
-    violations = [
-        path
-        for path in tracked
-        if path in FORBIDDEN_NAMES
-        or path.startswith(FORBIDDEN_PREFIXES)
-        or path.endswith(FORBIDDEN_SUFFIXES)
-    ]
+    violations = [path for path in tracked if is_forbidden(path)]
     if violations:
         print("Tracked user-content or credential-like files are forbidden:", file=sys.stderr)
         print("\n".join(violations), file=sys.stderr)

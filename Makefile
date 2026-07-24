@@ -4,6 +4,10 @@ PDF ?= examples/synthetic-codebook/source.txt
 ARTIFACTS ?= artifacts
 BACKEND ?= local-artifacts
 OCR_MODE ?= auto
+SCHEMA ?= codebook
+EMBEDDING_PROVIDER ?=
+EMBEDDING_MODEL ?=
+EMBEDDING_ARGS = $(if $(EMBEDDING_PROVIDER),--embedding-provider "$(EMBEDDING_PROVIDER)") $(if $(EMBEDDING_MODEL),--embedding-model "$(EMBEDDING_MODEL)")
 QUERY ?= synthetic branch circuit
 CODEBOOK_DATABASE_URL ?= postgresql://codebook:codebook-local-only@127.0.0.1:55432/codebook_test
 
@@ -27,13 +31,13 @@ ask:
 	@$(PYTHON) -m codebook_agent ask --profile "$(PROFILE)"
 
 plan:
-	@$(PYTHON) -m codebook_agent plan --profile "$(PROFILE)" --pdf "$(PDF)" --backend "$(BACKEND)" --ocr-mode "$(OCR_MODE)"
+	@$(PYTHON) -m codebook_agent plan --profile "$(PROFILE)" --pdf "$(PDF)" --artifacts "$(ARTIFACTS)" --backend "$(BACKEND)" --schema "$(SCHEMA)" $(EMBEDDING_ARGS) --ocr-mode "$(OCR_MODE)"
 
 dry:
-	@$(PYTHON) -m codebook_agent dry --profile "$(PROFILE)" --pdf "$(PDF)" --backend "$(BACKEND)" --ocr-mode "$(OCR_MODE)"
+	@$(PYTHON) -m codebook_agent dry --profile "$(PROFILE)" --pdf "$(PDF)" --artifacts "$(ARTIFACTS)" --backend "$(BACKEND)" --schema "$(SCHEMA)" $(EMBEDDING_ARGS) --ocr-mode "$(OCR_MODE)"
 
 ingest:
-	@CODEBOOK_DATABASE_URL="$(CODEBOOK_DATABASE_URL)" $(PYTHON) -m codebook_agent ingest --apply --profile "$(PROFILE)" --pdf "$(PDF)" --artifacts "$(ARTIFACTS)" --backend "$(BACKEND)" --ocr-mode "$(OCR_MODE)"
+	@CODEBOOK_DATABASE_URL="$(CODEBOOK_DATABASE_URL)" $(PYTHON) -m codebook_agent ingest --apply --profile "$(PROFILE)" --pdf "$(PDF)" --artifacts "$(ARTIFACTS)" --backend "$(BACKEND)" --schema "$(SCHEMA)" $(EMBEDDING_ARGS) --ocr-mode "$(OCR_MODE)"
 
 export:
 	@$(PYTHON) -m codebook_agent export jsonl --profile "$(PROFILE)" --artifacts "$(ARTIFACTS)"

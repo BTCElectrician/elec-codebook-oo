@@ -28,7 +28,9 @@ version.
 
 OCR is deliberately an extraction adapter, not an answer model. It makes no network calls.
 `off`, `auto`, and `always` modes are profile/CLI controlled. Tesseract TSV output is reconstructed
-into paragraphs, and mean word confidence is carried into document metadata and citations.
+into paragraphs with tab-delimited, quote-neutral parsing, and mean word confidence is carried into
+document metadata and citations. Auto mode constructs the OCR adapter only when at least one page
+actually needs OCR.
 
 The synthetic OCR regression creates an image-only PDF at test time, proves pypdf sees no text,
 then exercises real PDFium rendering and Tesseract. The combined integration test indexes that
@@ -47,6 +49,9 @@ The SQL migration is packaged at `codebook_agent/backends/sql/001_pgvector.sql`.
 
 ## Safety
 
-Planning never constructs a database client. Pgvector operations require `CODEBOOK_DATABASE_URL`;
-the URL is never printed. Integration tests reject non-local hosts and database names without
-`test`, use a unique schema, log phases as JSON lines, and remove the schema after each run.
+Planning never constructs a database or embedding client. It resolves the exact artifact path or
+PostgreSQL schema and reports whether the selected embedding provider would receive document
+`search_text`. Pgvector operations require `CODEBOOK_DATABASE_URL`; the URL is never printed.
+Ingest verifies PostgreSQL before a paid embedding call. Integration tests reject non-local hosts
+and database names without `test`, use a unique schema, log phases as JSON lines, and remove the
+schema after each run.

@@ -92,7 +92,11 @@ def native_text_is_usable(text: str, *, min_characters: int) -> bool:
 def _parse_tesseract_tsv(raw_tsv: str) -> tuple[str, float | None]:
     """Rebuild readable lines and a mean word confidence from Tesseract TSV."""
 
-    reader = csv.DictReader(io.StringIO(raw_tsv), delimiter="\t")
+    reader = csv.DictReader(
+        io.StringIO(raw_tsv),
+        delimiter="\t",
+        quoting=csv.QUOTE_NONE,
+    )
     paragraphs: list[list[str]] = []
     current_paragraph: tuple[str, str] | None = None
     current_line: tuple[str, str, str] | None = None

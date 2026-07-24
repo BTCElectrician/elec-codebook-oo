@@ -1,13 +1,26 @@
 import subprocess
 from pathlib import Path
 
+from scripts.leak_guard import is_forbidden
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_generated_derivatives_are_ignored():
     ignored = (ROOT / ".gitignore").read_text(encoding="utf-8")
-    for required in (".env", "artifacts/", "*.pdf", "output/"):
+    docker_ignored = (ROOT / ".dockerignore").read_text(encoding="utf-8")
+    for required in (".env", ".env.*", "artifacts/", "*.pdf", "*.jsonl", "output/"):
         assert required in ignored
+    for required in (".env", ".env.*", "artifacts", "*.pdf", "*.jsonl", "output"):
+        assert required in docker_ignored
+
+
+def test_leak_guard_rejects_nested_env_files_and_page_image_directories():
+    assert is_forbidden("config/.env.local")
+    assert is_forbidden("docs/page_images/page-1.png")
+    assert is_forbidden("exports/book.jsonl")
+    assert not is_forbidden(".env.example")
+    assert not is_forbidden("docs/images/original-project-logo.png")
 
 
 def test_profiles_contain_no_extracted_text_fields():
