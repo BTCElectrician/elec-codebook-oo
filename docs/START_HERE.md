@@ -1,15 +1,18 @@
 # Start here
 
-Install a Python 3.11+ environment and the developer extras if you intend to test:
-
 ```bash
-python -m pip install -e '.[dev]'
+python -m pip install -e '.[dev,pdf,postgres]'
 make doctor
 make caps-json
 make ask
 make smoke
+make pgvector-up
+make test-pgvector
+make pgvector-down
 ```
 
-For a real authorized PDF, add the optional parser with `python -m pip install -e '.[pdf]'`.
-Then copy the bundled metadata-only profile, edit the book metadata, run `make plan` and `make dry`,
-and obtain approval before `make ingest`. See `docs/AGENT_ONBOARDING.md` for the agent sequence.
+For an operator-owned source, copy `generic-reference-template.json` outside git, fill in its
+identity and page mapping, then run `make plan` and `make dry`. Obtain approval immediately before
+`make ingest`.
+
+Use `BACKEND=local-artifacts` for JSON/JSONL or `BACKEND=pgvector` for searchable PostgreSQL.

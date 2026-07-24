@@ -1,10 +1,46 @@
 # Profile schema
 
-Profiles are JSON metadata, never extracted book content. Required fields are `id`, `title`,
-`document_type`, `backend`, and `questions`. The only accepted backend in v0.1 is
-`local-artifacts`. Optional fields include `edition`, `legal_use_required`, `content_ranges`, and
-`printed_page_offset`.
+Profiles contain metadata and operator questions, never source extracts.
 
-Copy `codebook_agent/profiles/nfpa70-reference-template.json` to start an electrical-codebook
-profile. Replace placeholders with metadata about your authorized document; do not paste chapters,
-tables, or source text into the profile.
+Required:
+
+- `id`: 1-128 letters, digits, dots, underscores, or hyphens
+- `title`
+- `document_type`
+- `backend`: `local-artifacts` or `pgvector`
+- `questions`: list of strings
+
+Optional:
+
+- `edition`
+- `legal_use_required`
+- `content_ranges`
+- `printed_page_offset`
+- `max_chunk_chars` (minimum 200, default 1800)
+- `embedding.provider`: `hash` or `openai`
+- `embedding.model`
+
+`content_ranges` maps type names to page ranges. Supported shapes are:
+
+```json
+{
+  "main": [10, 400],
+  "definitions": [[401, 410], [520, 525]],
+  "tables": [
+    {"start_pdf_page": 411, "end_pdf_page": 519}
+  ]
+}
+```
+
+Unmatched pages use `main`. Type names are extensible.
+
+`printed_page_offset` follows:
+
+```text
+printed page = PDF page - printed_page_offset
+```
+
+Use `null` when no mapping is known. Non-positive results remain null.
+
+The default is `generic-reference-template.json`. The NFPA-named profile is an optional metadata
+shape only and includes no edition data, page ranges, index names, or source content.

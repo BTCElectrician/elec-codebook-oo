@@ -6,11 +6,21 @@ import json
 from pathlib import Path
 from typing import Any
 
+from ..models import CodebookDocument
 
-def write_documents(root: Path, profile_id: str, documents: list[dict[str, Any]]) -> Path:
+
+def write_documents(
+    root: Path,
+    profile_id: str,
+    documents: list[dict[str, Any]] | list[CodebookDocument],
+) -> Path:
     destination = root / "local" / profile_id / "documents.json"
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(json.dumps(documents, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    payload = [
+        document.to_dict() if isinstance(document, CodebookDocument) else document
+        for document in documents
+    ]
+    destination.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return destination
 
 

@@ -2,21 +2,45 @@
 
 ## Current state
 
-Initial OSS MVP: local profile planning, synthetic-fixture ingest, local artifact staging, and
-portable JSONL export are implemented. The default path is AI-free and makes no network calls.
+Version 0.2 implements evidence-preserving ingestion and a backend-neutral retrieval contract.
+Local JSON/JSONL remains the default. PostgreSQL/pgvector is the implemented searchable backend.
 
 ## Implemented
 
-- Metadata-only profiles and agent interview questions
-- Local no-write planning/dry-run
-- Local text/PDF ingestion (`pypdf` is an optional PDF extra)
-- Local JSON artifacts and JSONL export
-- Synthetic smoke workflow and leak-focused tests
+- Generic metadata-only profile and optional NFPA reference profile
+- No-write/no-connection plan and dry-run
+- Page-preserving text, Markdown, and optional pypdf extraction
+- Source SHA-256, PDF/printed pages, content types, article/section context
+- Versioned `CodebookDocument` and `SearchResult` contracts
+- Local JSON and JSONL
+- Deterministic hash embeddings for offline plumbing/tests
+- Optional OpenAI 1,536-dimension embedding adapter
+- PostgreSQL migration, atomic upserts, stale cleanup, GIN full-text, HNSW vectors
+- Hybrid reciprocal-rank-fusion retrieval
+- Search/query CLI and deterministic evidence-grounded answers
+- Mock-free disposable pgvector integration test with production guards
 
 ## Not implemented
 
-- Azure publishing, OpenAI processing, local search/chat, and all candidate vector backends
+- OCR for scanned pages
+- Edition-specific NEC parsing or multi-page table reconstruction
+- Generative answer synthesis
+- Azure AI Search, LanceDB, Qdrant, or OpenSearch adapters
+- Hosted service, authentication, or multi-user access control
 
 ## Validation
 
-Run `make check` for the no-network test and smoke suite. Run `git diff --check` before commits.
+Default:
+
+```bash
+make check
+git diff --check
+```
+
+Real pgvector:
+
+```bash
+make pgvector-up
+make test-pgvector
+make pgvector-down
+```

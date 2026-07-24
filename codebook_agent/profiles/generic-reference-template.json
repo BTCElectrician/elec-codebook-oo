@@ -1,0 +1,29 @@
+{
+  "id": "generic-reference-template",
+  "title": "Authorized technical reference",
+  "edition": "replace-with-edition",
+  "document_type": "technical-reference",
+  "legal_use_required": true,
+  "content_ranges": {
+    "front_matter": [],
+    "main": [],
+    "definitions": [],
+    "tables": [],
+    "annexes": []
+  },
+  "printed_page_offset": null,
+  "max_chunk_chars": 1800,
+  "backend": "local-artifacts",
+  "embedding": {
+    "provider": "hash",
+    "model": "codebook-hash-v1"
+  },
+  "questions": [
+    "Do you have the right to process this edition and source locally?",
+    "What is the absolute source path?",
+    "Which PDF pages contain front matter, main content, definitions, tables, and annexes?",
+    "How does the printed page number differ from the PDF page index?",
+    "Do you want portable local artifacts or a PostgreSQL/pgvector index?",
+    "Where should generated derivatives be stored?"
+  ]
+}
