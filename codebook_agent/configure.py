@@ -96,7 +96,7 @@ def inspect_source(source_path: Path, *, min_native_characters: int = 40) -> dic
                 else:
                     low_text_pages.append(number)
             raw_pages = [""] * len(reader.pages)
-        except Exception as error:  # noqa: BLE001 - pypdf exposes several reader errors
+        except Exception as error:
             raise ValueError(
                 f"Could not inspect PDF '{source.name}': {type(error).__name__}. "
                 "Verify the file opens locally and is not locked, then retry."
