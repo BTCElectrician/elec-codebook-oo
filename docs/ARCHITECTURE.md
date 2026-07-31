@@ -27,7 +27,9 @@ Discovery and configuration preview are side-effect-free. `codebook agent --json
 `schema --json`, and `robot-docs guide` do not construct database or provider
 clients and do not write artifacts. `configure` additionally requires `--authorized` before it
 reads local source text for page-density inspection; it returns no extracted text and writes a
-profile only with `--apply`.
+profile only with `--apply`. Its assessment separates observed facts from local candidates,
+confidence/evidence, and unresolved operator decisions; candidates never become profile authority
+without explicit flags.
 
 ## Boundaries
 
@@ -36,7 +38,8 @@ authorized source -> configure proposal -> approved profile -> native extractor 
 ```
 
 - Extraction owns source identity and page evidence.
-- Configuration owns local inspection metrics, safe defaults, and unresolved operator decisions.
+- Configuration owns local inspection metrics, safe defaults, labeled local candidates, and
+  unresolved operator decisions.
 - Profiles own operator-controlled metadata and content ranges.
 - Backends own persistence and ranking, not document meaning.
 - Answer renderers consume retrieved evidence and cannot mutate an index.

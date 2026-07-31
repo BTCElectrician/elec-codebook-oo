@@ -68,7 +68,18 @@ def test_configure_preview_is_local_deterministic_and_write_free(tmp_path, capsy
     assert payload["inspection"]["retained_text"] is False
     assert "page one" not in first.out
     assert payload["inspection"]["page_count"] == 2
-    assert payload["profile"]["edition"] == "2026"
+    assert "edition" not in payload["profile"]
+    assessment = payload["configuration_assessment"]
+    assert assessment == payload["inspection"]["configuration_assessment"]
+    assert assessment["retained_text"] is False
+    edition = next(
+        candidate
+        for candidate in assessment["inferred_candidates"]
+        if candidate["field"] == "edition"
+    )
+    assert edition["candidate"] == "2026"
+    assert edition["confidence"] == {"level": "medium", "score": 0.67}
+    assert edition["profile_effect"] == "operator must explicitly set --edition"
     assert payload["profile"]["content_ranges"] == {"main": [1, 2]}
     assert payload["profile"]["ocr"]["mode"] == "off"
     assert "--apply" in payload["commands"]["apply_profile"]
@@ -78,6 +89,93 @@ def test_configure_preview_is_local_deterministic_and_write_free(tmp_path, capsy
     applied = json.loads(capsys.readouterr().out)
     assert applied["applied"] is True
     assert load_profile(output)["id"] == "safety-manual-2026"
+
+
+def test_configure_proposes_semantic_ranges_and_page_mapping_without_applying_them(
+    tmp_path, capsys
+):
+    source = tmp_path / "Reference 2026.txt"
+    source.write_text(
+        "TABLE OF CONTENTS\nprivate phrase from source\f"
+        "PREFACE\nPage 1\f"
+        "INSTALLATION\nPage 2\f"
+        "MAINTENANCE\nPage 3\f"
+        "INDEX\nPage 4",
+        encoding="utf-8",
+    )
+
+    assert main(["configure", "--source", str(source), "--authorized", "--json"]) == 0
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    candidates = {
+        candidate["field"]: candidate
+        for candidate in payload["configuration_assessment"]["inferred_candidates"]
+    }
+
+    assert "private phrase from source" not in captured.out
+    assert candidates["edition"]["candidate"] == "2026"
+    assert candidates["printed_page_offset"]["candidate"] == 1
+    assert candidates["printed_page_offset"]["confidence"]["level"] == "high"
+    assert candidates["content_ranges"]["candidate"] == {
+        "front_matter": [[1, 1]],
+        "index": [[5, 5]],
+        "main": [[2, 4]],
+    }
+    assert payload["profile"]["content_ranges"] == {"main": [1, 5]}
+    assert payload["profile"]["printed_page_offset"] is None
+    assert "edition" not in payload["profile"]
+    unresolved = {decision["field"]: decision["reason"] for decision in payload["unresolved_decisions"]}
+    assert "candidate" in unresolved["edition"]
+    assert "candidate" in unresolved["printed_page_offset"]
+    assert "candidate" in unresolved["content_ranges"]
+
+
+def test_configure_marks_ambiguous_page_mapping_as_low_confidence(tmp_path, capsys):
+    source = tmp_path / "manual.md"
+    source.write_text("ONE\nPage 1\fTWO\nPage 9\fTHREE\nPage 2", encoding="utf-8")
+
+    assert main(["configure", "--source", str(source), "--authorized", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    mappings = [
+        candidate
+        for candidate in payload["configuration_assessment"]["inferred_candidates"]
+        if candidate["field"] == "printed_page_offset"
+    ]
+
+    assert len(mappings) == 3
+    assert {candidate["confidence"]["level"] for candidate in mappings} == {"low"}
+    assert payload["profile"]["printed_page_offset"] is None
+
+
+def test_configure_reports_markdown_layout_without_promoting_structure_to_source_fact(tmp_path, capsys):
+    source = tmp_path / "manual.md"
+    source.write_text("# Setup\n| Part | Size |\n| --- | --- |\n| A | 1 |", encoding="utf-8")
+
+    assert main(["configure", "--source", str(source), "--authorized", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    observed = payload["configuration_assessment"]["observed_facts"]
+    structure = next(
+        candidate
+        for candidate in payload["configuration_assessment"]["inferred_candidates"]
+        if candidate["field"] == "structure"
+    )
+
+    assert observed["source_format"] == "md"
+    assert observed["layout_characteristics"]["table_like_pages"] == 1
+    assert structure["confidence"]["level"] == "low"
+    assert "not evidence of document semantics" in structure["profile_effect"]
+
+
+def test_configure_rejects_unreadable_or_unsupported_sources(tmp_path, capsys):
+    binary = tmp_path / "manual.txt"
+    binary.write_bytes(b"\xff\xfe")
+    unsupported = tmp_path / "manual.docx"
+    unsupported.write_text("not inspected", encoding="utf-8")
+
+    assert main(["configure", "--source", str(binary), "--authorized"]) == 1
+    assert "UTF-8" in capsys.readouterr().err
+    assert main(["configure", "--source", str(unsupported), "--authorized"]) == 1
+    assert "authorized .pdf, .txt, or .md" in capsys.readouterr().err
 
 
 def test_configure_apply_writes_a_loadable_metadata_profile(tmp_path, capsys):
@@ -218,6 +316,49 @@ def test_configure_reports_scanned_pdf_ocr_need(tmp_path, capsys):
     assert payload["inspection"]["low_text_page_ranges"] == [[1, 1]]
     assert payload["inspection"]["ocr_recommended"] is True
     assert payload["profile"]["ocr"]["mode"] == "auto"
+
+
+def test_configure_finds_repeated_pdf_page_labels_without_exposing_pdf_text(tmp_path, capsys):
+    pypdf = pytest.importorskip("pypdf")
+    from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+
+    source = tmp_path / "reference.pdf"
+    writer = pypdf.PdfWriter()
+    font = DictionaryObject(
+        {
+            NameObject("/Type"): NameObject("/Font"),
+            NameObject("/Subtype"): NameObject("/Type1"),
+            NameObject("/BaseFont"): NameObject("/Helvetica"),
+        }
+    )
+    for number in range(1, 5):
+        page = writer.add_blank_page(width=200, height=200)
+        page[NameObject("/Resources")] = DictionaryObject(
+            {NameObject("/Font"): DictionaryObject({NameObject("/F1"): font})}
+        )
+        stream = DecodedStreamObject()
+        stream.set_data(
+            f"BT /F1 12 Tf 12 180 Td (Synthetic PDF body wording for page {number} only) Tj ET\n"
+            f"BT /F1 12 Tf 12 12 Td (Page {number}) Tj ET".encode()
+        )
+        page[NameObject("/Contents")] = writer._add_object(stream)
+    with source.open("wb") as destination:
+        writer.write(destination)
+
+    assert main(["configure", "--source", str(source), "--authorized", "--json"]) == 0
+    captured = capsys.readouterr().out
+    payload = json.loads(captured)
+    mapping = next(
+        candidate
+        for candidate in payload["configuration_assessment"]["inferred_candidates"]
+        if candidate["field"] == "printed_page_offset"
+    )
+
+    assert "Synthetic PDF body" not in captured
+    assert payload["inspection"]["native_text_pages"] == 4
+    assert mapping["candidate"] == 0
+    assert mapping["confidence"]["level"] == "high"
+    assert payload["profile"]["printed_page_offset"] is None
 
 
 def test_configure_teaches_content_range_shape(tmp_path, capsys):

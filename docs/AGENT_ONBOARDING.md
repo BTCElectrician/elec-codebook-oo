@@ -77,7 +77,8 @@ machine contract, Make targets, and agent entry points.
 
 1. Confirm the operator may process the exact source in the intended way.
 2. Run `codebook configure --source /absolute/path/book.pdf --authorized --json`.
-3. Explain the local inspection metrics and ask the unresolved questions rather than guessing.
+3. Explain observed facts separately from confidence-scored local candidates; ask the unresolved
+   questions rather than treating a candidate as an answer.
 4. Adjust the returned profile command for edition, content ranges, printed-page offset, OCR
    policy, backend, and embedding choice; run it with `--apply` only after review.
 5. Run the returned `plan` command and then `make dry`.

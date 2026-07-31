@@ -67,6 +67,7 @@ def _json(value: object) -> None:
 def _render_configuration(result: dict[str, object]) -> None:
     inspection = dict(result["inspection"])  # type: ignore[arg-type]
     profile = dict(result["profile"])  # type: ignore[arg-type]
+    assessment = dict(inspection["configuration_assessment"])  # type: ignore[arg-type]
     decisions = list(result["unresolved_decisions"])  # type: ignore[arg-type]
     commands = dict(result["commands"])  # type: ignore[arg-type]
     action = "Wrote" if result["applied"] else "Proposed"
@@ -80,6 +81,13 @@ def _render_configuration(result: dict[str, object]) -> None:
         f"ocr={dict(profile['ocr'])['mode']}"
     )
     print("Network/provider calls: none")
+    candidates = list(assessment["inferred_candidates"])
+    if candidates:
+        print("Local candidates (not applied to profile):")
+        for candidate in candidates:
+            value = dict(candidate)
+            confidence = dict(value["confidence"])
+            print(f"  - {value['field']} ({confidence['level']} confidence)")
     if decisions:
         print("Confirm with the operator:")
         for decision in decisions:
@@ -318,6 +326,7 @@ def command(args: argparse.Namespace) -> int:
             "provider_calls": [],
             "authorization_confirmed": True,
             "inspection": inspection,
+            "configuration_assessment": inspection["configuration_assessment"],
             "profile": profile,
             "profile_path": str(output),
             "applied": bool(args.apply),

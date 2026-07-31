@@ -6,7 +6,7 @@
 
 [![Test](https://github.com/BTCElectrician/elec-codebook-oo/actions/workflows/ci.yml/badge.svg)](https://github.com/BTCElectrician/elec-codebook-oo/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
-[![Version 0.6.0](https://img.shields.io/badge/version-0.6.0-6f42c1)](pyproject.toml)
+[![Version 0.6.0](https://img.shields.io/badge/version-0.6.0-6f42c1)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **Turn an authorized codebook, specification, or technical manual into page-cited local records or
@@ -26,7 +26,8 @@ make doctor
 ```
 
 There is no supported curl installer or published package release yet. Install from source with pip
-or uv.
+or uv. See the [changelog](CHANGELOG.md) for version history and the
+[release procedure](docs/RELEASING.md) for the future GitHub tag/release workflow.
 
 ## Built for developers and coding agents
 
@@ -84,9 +85,9 @@ authorized manual, inspect how it was processed, search it in ordinary language,
 answer back to wording and pages you can verify. AI is optional assistance around the source—not a
 replacement for the book, training, or field judgment.
 
-| Capability | What works in v0.6.0 |
+| Capability | What the current worktree supports |
 | --- | --- |
-| Guided source setup | Local inspection proposes a metadata-only profile, OCR policy, and next commands |
+| Guided source setup | Local inspection reports facts plus labeled, confidence-scored candidates; it proposes a metadata-only profile and next commands |
 | Evidence-preserving ingestion | Text, Markdown, native PDF text, and local OCR remain page-local |
 | Real OCR fallback | Image-only or low-text PDF pages use local Tesseract with confidence metadata |
 | Auditable OCR correction | Optional model repair preserves raw text and rejects changed identifiers |
@@ -382,9 +383,12 @@ See [docs/DOCKER.md](docs/DOCKER.md) for ports, volumes, and teardown.
      --json
    ```
 
-   This counts pages and measures native-text density. It retains no extracted text, makes no
-   network or provider call, and writes nothing. The result identifies unresolved decisions and
-   returns an exact `apply_profile` command.
+   This counts pages and measures native-text density. It also emits deterministic local
+   candidates for an edition, printed-page offset, semantic ranges, OCR policy, and layout shape.
+   Candidates include confidence and evidence counts but no extracted source text. They are not
+   applied to the profile: edition, page mapping, and semantic ranges remain operator decisions.
+   The command makes no network or provider call, writes nothing, identifies unresolved decisions,
+   and returns an exact `apply_profile` command.
 
 3. Discuss the edition, printed-page mapping, content ranges, OCR recommendation, and storage
    choice with your coding agent. Run the returned command after adding or changing flags as needed:
@@ -712,8 +716,10 @@ the stable evidence fields requires a new document schema version and database m
 ### Can I drop in any document and have it configure itself perfectly?
 
 No. `configure` supports authorized PDF, text, and Markdown sources. It can count pages, measure
-native-text density, recommend local OCR, propose a profile, and give a coding agent deterministic
-next commands. Edition, printed-page mapping, content ranges, unusual layouts, and schema changes
+native-text density, recommend local OCR, and report deterministic confidence-scored candidates for
+edition, repeated printed-page labels, a few exact semantic section markers, and coarse layout
+characteristics. It does not claim to understand arbitrary documents or automatically accept those
+candidates. Edition, printed-page mapping, content ranges, unusual layouts, and schema changes
 still require conversation and operator review.
 
 ### Do planning commands connect to PostgreSQL?
