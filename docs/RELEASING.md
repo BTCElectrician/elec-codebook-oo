@@ -24,13 +24,14 @@ operator approval.
    ```
 
 6. After separate approval to publish, push the reviewed commit and tag, then create the GitHub
-   Release from the tag. This repository has no package artifact workflow yet, so do not attach an
-   invented binary or wheel.
+   Release from the tag with a concise version-specific notes file. This repository has no package
+   artifact workflow yet, so do not attach an invented binary or wheel or use the full changelog as
+   the release body.
 
    ```bash
    git push origin <branch>
    git push origin vX.Y.Z
-   gh release create vX.Y.Z --title "vX.Y.Z" --generate-notes
+   gh release create vX.Y.Z --title "vX.Y.Z" --notes-file docs/release-notes/vX.Y.Z.md
    ```
 
 7. Verify GitHub resolves the tag and release to the intended SHA, confirm CI for that SHA, and

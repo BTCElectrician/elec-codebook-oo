@@ -6,7 +6,7 @@
 
 [![Test](https://github.com/BTCElectrician/elec-codebook-oo/actions/workflows/ci.yml/badge.svg)](https://github.com/BTCElectrician/elec-codebook-oo/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
-[![Version 0.6.0](https://img.shields.io/badge/version-0.6.0-6f42c1)](CHANGELOG.md)
+[![Version 0.7.0](https://img.shields.io/badge/version-0.7.0-6f42c1)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **Turn an authorized codebook, specification, or technical manual into page-cited local records or
@@ -25,9 +25,9 @@ python -m pip install -e '.[pdf,ocr,postgres]'
 make doctor
 ```
 
-There is no supported curl installer or published package release yet. Install from source with pip
+There is no supported curl installer or published package distribution yet. Install from source with pip
 or uv. See the [changelog](CHANGELOG.md) for version history and the
-[release procedure](docs/RELEASING.md) for the future GitHub tag/release workflow.
+[release procedure](docs/RELEASING.md) for the GitHub tag/release workflow.
 
 ## Built for developers and coding agents
 
@@ -577,7 +577,7 @@ codebook answer --profile /path/profile.json --query "minimum cover" \
 
 | Approach | Page evidence | Backend-neutral records | Search | Best fit |
 | --- | --- | --- | --- | --- |
-| **Elec Codebook OO v0.6.0** | Native text + local OCR, PDF + printed page | Yes | PostgreSQL hybrid | Guided, auditable BYO-document workflows |
+| **Elec Codebook OO v0.7.0** | Native text + local OCR, PDF + printed page | Yes | PostgreSQL hybrid | Guided, auditable BYO-document workflows |
 | One-off PDF script | Often lost | Usually no | No | Disposable extraction |
 | Hosted document assistant | Provider-dependent | Usually no | Hosted | Fast use when upload terms are acceptable |
 | Raw pgvector tutorial | Application-defined | Application-defined | Vector only unless extended | Learning vector SQL |
@@ -585,11 +585,13 @@ codebook answer --profile /path/profile.json --query "minimum cover" \
 ## Limitations
 
 - No protected codebook content or prebuilt index is included.
-- Guided configuration supports `.pdf`, `.txt`, and `.md`; it proposes safe defaults but cannot
-  infer edition, printed-page offsets, semantic page ranges, or arbitrary schemas reliably.
+- Guided configuration supports `.pdf`, `.txt`, and `.md`; it returns narrow, confidence-scored
+  candidates for editions, repeated page labels, and exact semantic markers, but cannot
+  authoritatively infer arbitrary document meaning or schemas.
 - OCR is word-oriented Tesseract output; complex diagrams and table geometry still require review.
 - Model correction sees extracted text, not the page image, and may be rejected by safety gates.
-- Printed-page mapping is profile offset-based; generic footer/header detection is not implemented.
+- Printed-page mapping is profile offset-based; repeated edge-label candidates still require
+  operator confirmation, and arbitrary header/footer interpretation is not implemented.
 - Heading/structure detection is generic and deterministic, not an edition-specific NEC grammar.
 - Only clearly labeled, delimited continued tables are joined; arbitrary layouts are not inferred.
 - `hash` embeddings are deterministic plumbing, not production semantic embeddings.
