@@ -10,16 +10,20 @@ provider, or write project artifacts.
 This repository processes only content the operator is authorized to use. Never add source PDFs,
 extracted text, page images, chunks, exports, `artifacts/`, credentials, or a user's `.env` to git.
 
-Default commands are local-only. `plan`, `dry`, `ask`, and `caps` do not write artifacts, connect to
-PostgreSQL, or make provider calls. `ingest` requires `--apply`; it writes either the local artifact
+Default commands are local-only. `configure` preview, `plan`, `dry`, `ask`, and `caps` do not write
+artifacts, connect to PostgreSQL, or make provider calls. `configure` requires `--authorized` before
+local source inspection and `--apply` before writing a metadata-only profile. `ingest` requires
+`--apply`; it writes either the local artifact
 directory or the explicitly selected pgvector database. `export` writes local JSONL. PostgreSQL/
 pgvector hybrid retrieval and optional local Tesseract OCR are implemented. Model-based OCR
 correction is an optional explicit provider call, generic structure/table recovery is implemented,
 and generative synthesis is optional with citation validation and extractive fallback. Azure and
 other candidate retrieval backends are not implemented; do not imply otherwise.
 
-For a new book, ask the questions from `make ask`, create or edit a profile, run `make plan`, then
-`make dry`. Explain the exact output path or database target and get approval before `make ingest`.
+For a new book, confirm authorization and run `codebook configure --source /path/book.pdf
+--authorized --json`. Discuss its unresolved decisions, review the returned profile proposal, and
+run its `apply_profile` command only after approval. Then run `make plan` and `make dry`. Explain the
+exact output path or database target and get approval before `make ingest`.
 For pgvector, resolve `CODEBOOK_DATABASE_URL` without printing it and verify representative results
 include source wording and page evidence. Keep profiles metadata-only: no copied book text.
 Treat OCR output as uncertain evidence: preserve `ocr-tesseract` provenance and confidence, and

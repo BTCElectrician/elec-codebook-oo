@@ -31,6 +31,17 @@ from .cli_surface import (
     normalize_argv,
     render_help,
 )
+from .configure import (
+    MissingSourceDependencyError,
+    ProfileExistsError,
+    default_profile_path,
+    inspect_source,
+    profile_commands,
+    propose_profile,
+    unresolved_decisions,
+    validate_profile_path,
+    write_profile,
+)
 from .core import build_bundle, load_profile, plan
 from .correction import CorrectionConfig
 from .embeddings import build_embedding_provider, resolve_embedding_selection
@@ -51,6 +62,33 @@ CAPABILITIES = capabilities()
 
 def _json(value: object) -> None:
     print(json.dumps(value, indent=2, sort_keys=True))
+
+
+def _render_configuration(result: dict[str, object]) -> None:
+    inspection = dict(result["inspection"])  # type: ignore[arg-type]
+    profile = dict(result["profile"])  # type: ignore[arg-type]
+    decisions = list(result["unresolved_decisions"])  # type: ignore[arg-type]
+    commands = dict(result["commands"])  # type: ignore[arg-type]
+    action = "Wrote" if result["applied"] else "Proposed"
+    print(f"{action} metadata-only profile: {result['profile_path']}")
+    print(
+        f"Source: {inspection['format']} with {inspection['page_count']} page(s); "
+        f"{inspection['low_text_pages']} low-text PDF page(s)."
+    )
+    print(
+        f"Profile: {profile['id']} | backend={profile['backend']} | "
+        f"ocr={dict(profile['ocr'])['mode']}"
+    )
+    print("Network/provider calls: none")
+    if decisions:
+        print("Confirm with the operator:")
+        for decision in decisions:
+            print(f"  - {dict(decision)['question']}")
+    if result["applied"]:
+        print(f"Next: {commands['plan']}")
+    else:
+        print("No profile was written. Review the proposal, then apply it with:")
+        print(f"  {commands['apply_profile']}")
 
 
 def _database_url() -> str:
@@ -222,6 +260,78 @@ def command(args: argparse.Namespace) -> int:
         else:
             for number, question in enumerate(profile["questions"], start=1):
                 print(f"{number}. {question}")
+    elif args.command == "configure":
+        if not args.authorized:
+            raise SafetyError(
+                "Source inspection reads local document text to measure page and OCR needs. "
+                "Confirm you may process this exact source, then rerun the same command "
+                "with --authorized."
+            )
+        try:
+            inspection = inspect_source(args.source)
+        except MissingSourceDependencyError as error:
+            raise EnvironmentError(str(error)) from error
+        profile = propose_profile(
+            inspection,
+            profile_id=args.profile_id,
+            title=args.title,
+            edition=args.edition,
+            document_type=args.document_type,
+            backend=args.backend or "local-artifacts",
+            printed_page_offset=args.printed_page_offset,
+            max_chunk_chars=args.max_chunk_chars,
+            ocr_overrides=_ocr_overrides(args),
+            correction_overrides=_correction_overrides(args),
+            embedding_provider=args.embedding_provider,
+            embedding_model=args.embedding_model,
+            structure_enabled=args.structure_enabled,
+            recover_tables=args.recover_tables,
+            content_ranges=args.content_range,
+        )
+        output = args.output or default_profile_path(str(profile["id"]))
+        output = output.expanduser().resolve()
+        validate_profile_path(output)
+        decisions = unresolved_decisions(
+            inspection,
+            profile,
+            explicit_content_ranges=bool(args.content_range),
+            authorization_confirmed=True,
+        )
+        commands = profile_commands(
+            args.source,
+            output,
+            profile,
+            overwrite=args.overwrite,
+        )
+        writes: list[str] = []
+        if args.apply:
+            try:
+                destination = write_profile(output, profile, overwrite=args.overwrite)
+            except ProfileExistsError as error:
+                raise SafetyError(str(error)) from error
+            load_profile(destination)
+            writes.append(str(destination))
+        result: dict[str, object] = {
+            "contract_version": CLI_CONTRACT_VERSION,
+            "operation": "codebook-configure",
+            "network": False,
+            "provider_calls": [],
+            "authorization_confirmed": True,
+            "inspection": inspection,
+            "profile": profile,
+            "profile_path": str(output),
+            "applied": bool(args.apply),
+            "writes": writes,
+            "would_overwrite": output.exists() and not args.apply,
+            "unresolved_decisions": decisions,
+            "commands": commands,
+            "next": (
+                "Run the returned plan command and review every apply boundary."
+                if args.apply
+                else "Confirm unresolved decisions, then run the returned apply_profile command."
+            ),
+        }
+        _json(result) if args.json else _render_configuration(result)
     elif args.command in {"plan", "dry"}:
         result = plan(
             args.profile,
@@ -266,9 +376,7 @@ def command(args: argparse.Namespace) -> int:
                 document.metadata.get("extraction_method") == "ocr-tesseract"
                 for document in documents
             )
-            correction_config = CorrectionConfig.from_profile(
-                effective_profile.get("correction")
-            )
+            correction_config = CorrectionConfig.from_profile(effective_profile.get("correction"))
             accepted_corrections = sum(
                 page.correction_status == "accepted" for page in bundle.pages
             )
@@ -286,9 +394,7 @@ def command(args: argparse.Namespace) -> int:
                     "contract_version": CLI_CONTRACT_VERSION,
                     "operation": "local-ingest",
                     "network": (
-                        ["OpenAI text generation API"]
-                        if correction_config.mode != "off"
-                        else False
+                        ["OpenAI text generation API"] if correction_config.mode != "off" else False
                     ),
                     "documents": len(documents),
                     "ocr_documents": ocr_documents,
@@ -319,9 +425,7 @@ def command(args: argparse.Namespace) -> int:
                     page.correction_status == "rejected" for page in bundle.pages
                 )
                 provider = _provider_for_profile(effective_profile)
-                embeddings = provider.embed(
-                    [document.search_text for document in documents]
-                )
+                embeddings = provider.embed([document.search_text for document in documents])
                 count = backend.index_documents(
                     profile=effective_profile,
                     documents=documents,
@@ -387,11 +491,7 @@ def command(args: argparse.Namespace) -> int:
                     "apply": {
                         "network": [
                             "configured PostgreSQL",
-                            *(
-                                ["OpenAI embeddings API"]
-                                if provider == "openai"
-                                else []
-                            ),
+                            *(["OpenAI embeddings API"] if provider == "openai" else []),
                             *(
                                 ["OpenAI text generation API"]
                                 if args.answer_mode == "synthesized"
@@ -501,11 +601,7 @@ def command(args: argparse.Namespace) -> int:
             else:
                 print("Synthetic smoke passed: 3 evidence-preserving documents exported to JSONL.")
     elif args.command == "schema":
-        selected = (
-            OUTPUT_SCHEMAS
-            if args.name == "all"
-            else {args.name: OUTPUT_SCHEMAS[args.name]}
-        )
+        selected = OUTPUT_SCHEMAS if args.name == "all" else {args.name: OUTPUT_SCHEMAS[args.name]}
         _json(
             {
                 "contract_version": CLI_CONTRACT_VERSION,
@@ -514,9 +610,7 @@ def command(args: argparse.Namespace) -> int:
         )
     elif args.command == "robot-docs":
         if args.robot_topic != "guide":
-            raise CLIUsageError(
-                "robot-docs needs a topic. Run `codebook robot-docs guide`."
-            )
+            raise CLIUsageError("robot-docs needs a topic. Run `codebook robot-docs guide`.")
         if args.json:
             _json(
                 {

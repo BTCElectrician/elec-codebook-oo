@@ -6,7 +6,7 @@
 
 [![Test](https://github.com/BTCElectrician/elec-codebook-oo/actions/workflows/ci.yml/badge.svg)](https://github.com/BTCElectrician/elec-codebook-oo/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
-[![Version 0.5.0](https://img.shields.io/badge/version-0.5.0-6f42c1)](pyproject.toml)
+[![Version 0.6.0](https://img.shields.io/badge/version-0.6.0-6f42c1)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **Turn an authorized codebook, specification, or technical manual into page-cited local records or
@@ -53,6 +53,12 @@ It also gives the receiving model a conversation contract: accept ordinary
 language, lead with verified state, distinguish implemented from candidate
 behavior, and offer the useful next choice—understand, explain, change, run, or
 verify.
+
+You can then tell the agent, “I have this PDF,” “I have this codebook,” or “I
+have this specification.” The agent can use `codebook configure` to inspect the
+authorized local source, explain what it detected, ask about what it could not
+infer, and produce the exact profile, plan, and dry-run commands. It does not
+silently guess page mappings, enable a provider, or ingest the document.
 Use `codebook capabilities --json` for the full command/environment/exit-code
 contract, `codebook schema --json` for output shapes, and
 `codebook help <command>` for exact flags.
@@ -78,8 +84,9 @@ authorized manual, inspect how it was processed, search it in ordinary language,
 answer back to wording and pages you can verify. AI is optional assistance around the source—not a
 replacement for the book, training, or field judgment.
 
-| Capability | What works in v0.5.0 |
+| Capability | What works in v0.6.0 |
 | --- | --- |
+| Guided source setup | Local inspection proposes a metadata-only profile, OCR policy, and next commands |
 | Evidence-preserving ingestion | Text, Markdown, native PDF text, and local OCR remain page-local |
 | Real OCR fallback | Image-only or low-text PDF pages use local Tesseract with confidence metadata |
 | Auditable OCR correction | Optional model repair preserves raw text and rejects changed identifiers |
@@ -99,6 +106,7 @@ The bundled source is invented and safe to use:
 ```bash
 make agent-json
 make caps-json
+make configure PDF=examples/synthetic-codebook/source.txt
 make plan
 make dry
 make ingest
@@ -129,6 +137,10 @@ Source: source.txt, Article 1, PDF page 1
 
 ```text
 authorized .txt / .md / .pdf
+                     |
+             configure --authorized
+          local inspection; no retained text
+          profile proposal + unresolved decisions
                      |
                      | metadata-only profile
                      v
@@ -361,20 +373,53 @@ See [docs/DOCKER.md](docs/DOCKER.md) for ports, volumes, and teardown.
 ## Process your own authorized source
 
 1. Confirm that you may process the exact document in the intended way.
-2. Copy the generic profile outside the repository:
+2. Inspect the source locally and preview a metadata-only profile:
 
    ```bash
-   cp codebook_agent/profiles/generic-reference-template.json /absolute/path/profile.json
+   codebook configure \
+     --source /absolute/path/book.pdf \
+     --authorized \
+     --json
    ```
 
-3. Set its document identity, edition, page ranges, page offset, OCR policy, and backend.
+   This counts pages and measures native-text density. It retains no extracted text, makes no
+   network or provider call, and writes nothing. The result identifies unresolved decisions and
+   returns an exact `apply_profile` command.
+
+3. Discuss the edition, printed-page mapping, content ranges, OCR recommendation, and storage
+   choice with your coding agent. Run the returned command after adding or changing flags as needed:
+
+   ```bash
+   codebook configure \
+     --source /absolute/path/book.pdf \
+     --output ~/.config/elec-codebook-oo/profiles/my-book.json \
+     --id my-book-2026 \
+     --title "My Authorized Book" \
+     --edition 2026 \
+     --content-range front_matter:1-8 \
+     --content-range main:9-420 \
+     --printed-page-offset 8 \
+     --ocr-mode auto \
+     --backend pgvector \
+     --embedding-provider openai \
+     --embedding-model text-embedding-3-small \
+     --correction-mode off \
+     --authorized \
+     --apply \
+     --json
+   ```
+
+   `hash` is the offline default. Selecting OpenAI embeddings creates a future provider boundary
+   for document `search_text`; configuration itself still makes no provider call, and `plan` shows
+   that boundary before ingestion.
+
 4. Review the questions and plan:
 
    ```bash
-   make ask PROFILE=/absolute/path/profile.json
-   make plan PROFILE=/absolute/path/profile.json PDF=/absolute/path/book.pdf \
+   make ask PROFILE=~/.config/elec-codebook-oo/profiles/my-book.json
+   make plan PROFILE=~/.config/elec-codebook-oo/profiles/my-book.json PDF=/absolute/path/book.pdf \
      BACKEND=pgvector SCHEMA=codebook
-   make dry PROFILE=/absolute/path/profile.json PDF=/absolute/path/book.pdf \
+   make dry PROFILE=~/.config/elec-codebook-oo/profiles/my-book.json PDF=/absolute/path/book.pdf \
      BACKEND=pgvector SCHEMA=codebook
    ```
 
@@ -383,7 +428,7 @@ See [docs/DOCKER.md](docs/DOCKER.md) for ports, volumes, and teardown.
 
    ```bash
    make ingest \
-     PROFILE=/absolute/path/profile.json \
+     PROFILE=~/.config/elec-codebook-oo/profiles/my-book.json \
      PDF=/absolute/path/book.pdf \
      BACKEND=pgvector
    ```
@@ -391,8 +436,10 @@ See [docs/DOCKER.md](docs/DOCKER.md) for ports, volumes, and teardown.
 7. Query it:
 
    ```bash
-   make search PROFILE=/absolute/path/profile.json QUERY="What does Section 3.1 require?"
-   make answer PROFILE=/absolute/path/profile.json QUERY="What does Section 3.1 require?"
+   make search PROFILE=~/.config/elec-codebook-oo/profiles/my-book.json \
+     QUERY="What does Section 3.1 require?"
+   make answer PROFILE=~/.config/elec-codebook-oo/profiles/my-book.json \
+     QUERY="What does Section 3.1 require?"
    ```
 
 `plan` and `dry` display the exact local artifact path or PostgreSQL schema plus the effective
@@ -470,6 +517,7 @@ Read [docs/PROFILE_SCHEMA.md](docs/PROFILE_SCHEMA.md) for the complete contract.
 | `make doctor` | None | None | Check Python, optional extras, and local paths |
 | `make caps-json` | None | None | Machine-readable capability and safety contract |
 | `make ask` | None | None | Print profile onboarding questions |
+| `make configure PDF=/path/book.pdf` | None | None | Inspect an authorized source and preview a profile outside git |
 | `make plan` | None | None | Preview exact apply destination, provider boundary, and evidence contract |
 | `make dry` | None | None | Validate the same apply configuration without clients or writes |
 | `make ingest BACKEND=local-artifacts` | None | Local JSON | Apply-gated local ingest |
@@ -492,6 +540,7 @@ codebook help plan
 codebook capabilities --json
 codebook schema --json
 codebook caps --json
+codebook configure --source /path/book.pdf --authorized --json
 codebook plan --profile /path/profile.json --pdf /path/book.pdf --backend pgvector
 codebook ingest --apply --profile /path/profile.json --pdf /path/book.pdf \
   --backend pgvector --ocr-mode auto --correction-mode off
@@ -509,7 +558,8 @@ codebook answer --profile /path/profile.json --query "minimum cover" \
    extraction.
 2. **Behavioral parity, not provider imitation.** Every backend must return the same evidence
    contract even when its ranking algorithm differs.
-3. **Plan before apply.** Inspection does not connect to PostgreSQL, load credentials, or write.
+3. **Plan before apply.** Configuration previews and ingestion plans do not connect to PostgreSQL,
+   call a provider, or write without an explicit apply gate.
 4. **Operator-owned content stays outside git.** PDFs, extracts, vectors, indexes, and exports are
    user derivatives.
 5. **Capabilities are earned.** A backend is implemented only with adapter code, documentation,
@@ -523,7 +573,7 @@ codebook answer --profile /path/profile.json --query "minimum cover" \
 
 | Approach | Page evidence | Backend-neutral records | Search | Best fit |
 | --- | --- | --- | --- | --- |
-| **Elec Codebook OO v0.5.0** | Native text + local OCR, PDF + printed page | Yes | PostgreSQL hybrid | Auditable BYO-document workflows |
+| **Elec Codebook OO v0.6.0** | Native text + local OCR, PDF + printed page | Yes | PostgreSQL hybrid | Guided, auditable BYO-document workflows |
 | One-off PDF script | Often lost | Usually no | No | Disposable extraction |
 | Hosted document assistant | Provider-dependent | Usually no | Hosted | Fast use when upload terms are acceptable |
 | Raw pgvector tutorial | Application-defined | Application-defined | Vector only unless extended | Learning vector SQL |
@@ -531,6 +581,8 @@ codebook answer --profile /path/profile.json --query "minimum cover" \
 ## Limitations
 
 - No protected codebook content or prebuilt index is included.
+- Guided configuration supports `.pdf`, `.txt`, and `.md`; it proposes safe defaults but cannot
+  infer edition, printed-page offsets, semantic page ranges, or arbitrary schemas reliably.
 - OCR is word-oriented Tesseract output; complex diagrams and table geometry still require review.
 - Model correction sees extracted text, not the page image, and may be rejected by safety gates.
 - Printed-page mapping is profile offset-based; generic footer/header detection is not implemented.
@@ -550,6 +602,16 @@ codebook answer --profile /path/profile.json --query "minimum cover" \
 ### `Source not found`
 
 Pass an absolute existing `.txt`, `.md`, or `.pdf` path.
+
+### `Confirm you may process this exact source`
+
+Confirm the source's license, ownership, access terms, or other authorization, then rerun the
+preview with `--authorized`. This permits local inspection; it does not ingest or upload the source.
+
+### `Profile already exists`
+
+Review the existing metadata-only JSON. Choose another `--output`, or use `--overwrite --apply`
+only when replacement is intended. Authorization and overwrite flags are never inferred from typos.
 
 ### `PDF support is optional`
 
@@ -647,9 +709,17 @@ a retrieved passage is sufficient for a field decision.
 Use profile-defined content types and the document `metadata` JSON object for extensions. Changing
 the stable evidence fields requires a new document schema version and database migration.
 
+### Can I drop in any document and have it configure itself perfectly?
+
+No. `configure` supports authorized PDF, text, and Markdown sources. It can count pages, measure
+native-text density, recommend local OCR, propose a profile, and give a coding agent deterministic
+next commands. Edition, printed-page mapping, content ranges, unusual layouts, and schema changes
+still require conversation and operator review.
+
 ### Do planning commands connect to PostgreSQL?
 
-No. `plan`, `dry`, `ask`, and `caps` are no-connection and no-write commands. Planning resolves
+No. `configure` preview, `plan`, `dry`, `ask`, and `caps` make no network or provider calls.
+Configuration preview and planning are no-write commands. Planning resolves
 and displays the destination, schema, embedding contract, and future data boundary without reading
 the database URL or constructing a provider client.
 

@@ -21,7 +21,7 @@ CODEBOOK_DATABASE_URL ?= postgresql://codebook:codebook-local-only@127.0.0.1:554
 
 .DEFAULT_GOAL := help
 
-.PHONY: help agent-json robot-docs schemas-json doctor caps caps-json ask plan dry ingest export search answer example smoke test test-agent test-ocr test-pgvector lint leak-check check clean clean-apply docker-build docker-run pgvector-up pgvector-down
+.PHONY: help agent-json robot-docs schemas-json doctor caps caps-json ask configure plan dry ingest export search answer example smoke test test-agent test-ocr test-pgvector lint leak-check check clean clean-apply docker-build docker-run pgvector-up pgvector-down
 
 help:
 	@$(PYTHON) -m codebook_agent help
@@ -46,6 +46,9 @@ caps-json:
 
 ask:
 	@$(PYTHON) -m codebook_agent ask --profile "$(PROFILE)"
+
+configure:
+	@$(PYTHON) -m codebook_agent configure --source "$(PDF)" --authorized --json
 
 plan:
 	@$(PYTHON) -m codebook_agent plan --profile "$(PROFILE)" --pdf "$(PDF)" --artifacts "$(ARTIFACTS)" --backend "$(BACKEND)" --schema "$(SCHEMA)" $(EMBEDDING_ARGS) --ocr-mode "$(OCR_MODE)" $(CORRECTION_ARGS)

@@ -2,6 +2,22 @@
 
 Profiles contain metadata and operator questions, never source extracts.
 
+Generate a safe starting point without copying the template by hand:
+
+```bash
+codebook configure --source /absolute/path/book.pdf --authorized --json
+```
+
+The preview returns the proposed profile, local OCR assessment, unresolved decisions, and an exact
+`apply_profile` command. It retains no extracted text and makes no network or provider call. The
+profile is written only when that command includes `--apply`; an existing profile also requires
+`--overwrite`.
+
+The command accepts the same OCR, correction, and embedding overrides used by planning, plus
+`--content-range`, `--printed-page-offset`, `--max-chunk-chars`, `--no-structure`, and
+`--no-table-recovery`. Provider selections are recorded as future boundaries; configuration never
+constructs a provider client.
+
 Required:
 
 - `id`: 1-128 letters, digits, dots, underscores, or hyphens

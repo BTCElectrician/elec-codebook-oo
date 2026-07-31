@@ -10,7 +10,7 @@ from .embeddings import SUPPORTED_EMBEDDING_PROVIDERS
 from .models import DOCUMENT_SCHEMA_VERSION, PAGE_SCHEMA_VERSION
 from .text_models import TEXT_MODEL_PROVIDERS
 
-CLI_CONTRACT_VERSION = "1.0"
+CLI_CONTRACT_VERSION = "1.1"
 
 EXIT_CODES = {
     "0": {
@@ -115,6 +115,14 @@ COMMANDS = {
         "apply_required": True,
         "json": True,
         "example": "codebook clean --artifacts artifacts --plan",
+    },
+    "configure": {
+        "summary": "Inspect an authorized source and propose or write a metadata-only profile.",
+        "connections": [],
+        "writes": ["selected profile JSON path with --apply"],
+        "apply_required": True,
+        "json": True,
+        "example": "codebook configure --source book.pdf --authorized --json",
     },
     "doctor": {
         "summary": "Inspect local prerequisites without connecting or writing.",
@@ -272,6 +280,24 @@ OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
             "next",
         ],
     },
+    "profile-proposal": {
+        "type": "object",
+        "required": [
+            "operation",
+            "network",
+            "provider_calls",
+            "authorization_confirmed",
+            "inspection",
+            "profile",
+            "profile_path",
+            "applied",
+            "writes",
+            "unresolved_decisions",
+            "commands",
+            "next",
+        ],
+        "description": "Contains source metrics and profile metadata, never extracted text.",
+    },
     "retrieval": {
         "type": "object",
         "required": ["contract_version", "query", "results"],
@@ -284,6 +310,7 @@ CODE_MAP = {
         "paths": [
             "codebook_agent/cli.py",
             "codebook_agent/cli_surface.py",
+            "codebook_agent/configure.py",
             "codebook_agent/agent_contract.py",
             "tests/test_agent_contract.py",
             "tests/test_cli.py",
@@ -400,7 +427,9 @@ WORKFLOWS = {
         "Run focused tests, make check, and git diff --check.",
     ],
     "new-source": [
-        "codebook ask --profile /path/profile.json --json",
+        "Confirm the operator is authorized to process the exact source.",
+        "codebook configure --source /path/book.pdf --authorized --json",
+        "Review unresolved decisions and rerun the returned apply_profile command.",
         "codebook plan --profile /path/profile.json --pdf /path/book.pdf",
         "codebook dry --profile /path/profile.json --pdf /path/book.pdf",
         "Review the exact destination and request operator approval.",
@@ -420,6 +449,12 @@ def capabilities() -> dict[str, Any]:
         "document_schema_version": DOCUMENT_SCHEMA_VERSION,
         "page_schema_version": PAGE_SCHEMA_VERSION,
         "implemented_backends": sorted(SUPPORTED_BACKENDS),
+        "implemented_source_formats": ["md", "pdf", "txt"],
+        "implemented_configuration": [
+            "local-source-inspection",
+            "metadata-only-profile-proposal",
+            "apply-gated-profile-write",
+        ],
         "implemented_retrieval_backends": ["pgvector"],
         "implemented_embedding_providers": sorted(SUPPORTED_EMBEDDING_PROVIDERS),
         "implemented_ocr_engines": ["tesseract"],
@@ -472,7 +507,13 @@ Conversation contract
   Preview exact destinations and external data boundaries before consequential actions.
 
 Source workflow
-  ask -> plan -> dry -> review exact target -> ingest --apply -> verify retrieval evidence
+  configure -> plan -> dry -> review exact target -> ingest --apply -> verify evidence
+
+Configure a new source
+  1. Confirm the operator is authorized to process the exact source.
+  2. Run: codebook configure --source /path/book.pdf --authorized --json
+  3. Discuss unresolved decisions, then run the returned apply_profile command.
+  Configuration is local-only, returns no extracted text, and calls no provider.
 
 Hard boundaries
   Never commit source PDFs, extracts, page images, artifacts, JSONL exports, credentials, or .env.

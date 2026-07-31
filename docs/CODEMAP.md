@@ -23,6 +23,7 @@ codebook agent --json
 | Intent | Owning code | Focused tests | Contract that must survive |
 | --- | --- | --- | --- |
 | Change CLI behavior, help, JSON, errors, or safety gates | `codebook_agent/cli_surface.py`, `codebook_agent/cli.py`, `codebook_agent/agent_contract.py` | `tests/test_agent_contract.py`, `tests/test_cli.py` | Data on stdout, diagnostics on stderr; stable exit meanings; writes remain apply-gated |
+| Change guided source inspection or profile proposals | `codebook_agent/configure.py`, `codebook_agent/cli.py`, `codebook_agent/agent_contract.py` | `tests/test_cli.py`, `tests/test_agent_contract.py` | Authorization precedes inspection; no extracted text is returned; no network/provider calls; profile writes remain apply-gated |
 | Change document or page fields | `codebook_agent/models.py`, `codebook_agent/core.py` | `tests/test_core.py`, `tests/test_ocr.py` | Raw evidence remains recoverable; stable-field changes require a schema version |
 | Change extraction or page mapping | `codebook_agent/core.py`, `codebook_agent/ocr.py` | `tests/test_core.py`, `tests/test_ocr.py`, `tests/test_ocr_unit.py` | PDF and printed pages remain explicit; source SHA-256 and extraction provenance survive |
 | Change OCR behavior | `codebook_agent/ocr.py` | `tests/test_ocr.py`, `tests/test_ocr_unit.py` | OCR stays local and is always labeled `ocr-tesseract` with confidence |
@@ -39,7 +40,8 @@ codebook agent --json
 
 ```text
 authorized source
-  -> metadata-only profile
+  -> configure preview                local inspection, no retained text/network/write
+  -> approved metadata-only profile
   -> plan / dry                       no clients, connections, or writes
   -> ingest --apply
   -> native extraction
