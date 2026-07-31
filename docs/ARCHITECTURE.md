@@ -23,17 +23,20 @@ side-effect-free grammar, help, local health, and intent recovery.
 those surfaces so a new command or entry point cannot silently appear in only
 one place.
 
-This layer is side-effect-free. `codebook agent --json`, `capabilities --json`,
+Discovery and configuration preview are side-effect-free. `codebook agent --json`, `capabilities --json`,
 `schema --json`, and `robot-docs guide` do not construct database or provider
-clients and do not write artifacts.
+clients and do not write artifacts. `configure` additionally requires `--authorized` before it
+reads local source text for page-density inspection; it returns no extracted text and writes a
+profile only with `--apply`.
 
 ## Boundaries
 
 ```text
-source -> native extractor -> optional OCR -> optional correction -> structure -> CodebookDocument v2.2 -> backend -> SearchResult -> answer
+authorized source -> configure proposal -> approved profile -> native extractor -> optional OCR -> optional correction -> structure -> CodebookDocument v2.2 -> backend -> SearchResult -> answer
 ```
 
 - Extraction owns source identity and page evidence.
+- Configuration owns local inspection metrics, safe defaults, and unresolved operator decisions.
 - Profiles own operator-controlled metadata and content ranges.
 - Backends own persistence and ranking, not document meaning.
 - Answer renderers consume retrieved evidence and cannot mutate an index.

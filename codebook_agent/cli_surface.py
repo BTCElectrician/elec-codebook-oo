@@ -239,6 +239,80 @@ def build_parser() -> argparse.ArgumentParser:
     _profile_arg(ask)
     _json_arg(ask)
 
+    configure = sub.add_parser(
+        "configure",
+        help="inspect an authorized source and propose a metadata-only profile",
+    )
+    configure.add_argument(
+        "--source",
+        type=Path,
+        required=True,
+        help="authorized .pdf, .txt, or .md source to inspect locally",
+    )
+    configure.add_argument(
+        "--output",
+        type=Path,
+        help="profile JSON path (default: user config directory, outside the repository)",
+    )
+    configure.add_argument("--id", dest="profile_id", help="stable corpus/profile id")
+    configure.add_argument("--title", help="source title shown in retrieval context")
+    configure.add_argument("--edition", help="edition or revision label")
+    configure.add_argument(
+        "--document-type",
+        default="technical-reference",
+        help="generic document type (default: technical-reference)",
+    )
+    _backend_arg(configure)
+    configure.add_argument(
+        "--printed-page-offset",
+        type=int,
+        help="printed page = PDF page - this offset",
+    )
+    configure.add_argument(
+        "--content-range",
+        action="append",
+        help="repeatable TYPE:START-END range, for example definitions:12-18",
+    )
+    configure.add_argument(
+        "--max-chunk-chars",
+        type=int,
+        default=1800,
+        help="maximum deterministic chunk size (minimum 200; default: 1800)",
+    )
+    _ocr_args(configure)
+    _correction_args(configure)
+    _embedding_args(configure)
+    configure.add_argument(
+        "--no-structure",
+        action="store_false",
+        dest="structure_enabled",
+        default=True,
+        help="disable generic heading/list/note/table structure recovery",
+    )
+    configure.add_argument(
+        "--no-table-recovery",
+        action="store_false",
+        dest="recover_tables",
+        default=True,
+        help="disable explicitly continued delimited-table recovery",
+    )
+    configure.add_argument(
+        "--authorized",
+        action="store_true",
+        help="confirm you may inspect and process this exact source",
+    )
+    configure.add_argument(
+        "--apply",
+        action="store_true",
+        help="write the proposed metadata-only profile after reviewing the preview",
+    )
+    configure.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="with --apply, replace an existing profile after review",
+    )
+    _json_arg(configure)
+
     planner = sub.add_parser("plan", help="build a no-write ingestion plan")
     _profile_arg(planner)
     _source_arg(planner)
@@ -285,7 +359,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("artifacts"),
         help="local output root when local-artifacts is selected",
     )
-    ingest.add_argument("--apply", action="store_true", help="required to create artifacts or indexes")
+    ingest.add_argument(
+        "--apply", action="store_true", help="required to create artifacts or indexes"
+    )
     _json_arg(ingest)
 
     export = sub.add_parser("export", help="export local artifacts")
@@ -385,10 +461,7 @@ def render_help(topic: str | None = None) -> None:
         topic_parser.print_help()
         return
 
-    rows = [
-        f"  {name:<19} {details['summary']}"
-        for name, details in COMMANDS.items()
-    ]
+    rows = [f"  {name:<19} {details['summary']}" for name, details in COMMANDS.items()]
     print(
         "\n".join(
             [
@@ -402,7 +475,7 @@ def render_help(topic: str | None = None) -> None:
                 *rows,
                 "",
                 "Canonical source workflow:",
-                "  ask -> plan -> dry -> review exact target -> ingest --apply -> verify evidence",
+                "  configure -> plan -> dry -> review target -> ingest --apply -> verify evidence",
                 "",
                 "Rules:",
                 "  Discovery, planning, and dry-run commands do not connect or write.",
@@ -473,6 +546,7 @@ def agent_triage(artifacts: Path) -> dict[str, object]:
     recommendations = [
         "Read AGENTS.md and STATUS.md before editing.",
         "Use docs/CODEMAP.md to identify the owning contract and focused tests.",
+        "For a new source, run codebook configure --source /path/book.pdf --authorized --json.",
         "Run codebook plan before any source ingestion.",
     ]
     if not health["writable"]:
@@ -508,6 +582,7 @@ def top_level_commands() -> list[str]:
         "capabilities",
         "caps",
         "clean",
+        "configure",
         "doctor",
         "dry",
         "export",
@@ -563,7 +638,7 @@ def normalize_argv(
             normalized[1] = "guide"
 
     options = _option_strings(parser)
-    options.discard("--apply")
+    options.difference_update({"--apply", "--authorized", "--overwrite"})
     for index, value in enumerate(normalized):
         if not value.startswith("--"):
             continue

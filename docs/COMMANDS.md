@@ -8,6 +8,7 @@
 | `make doctor` | None | None | Reports pgvector, PDFium, Tesseract, and URL presence |
 | `make caps-json` | None | None | Commands, capabilities, exit codes, environment, and change map |
 | `make ask` | None | None | Profile interview questions |
+| `make configure PDF=/path/book.pdf` | None | None | Authorization-gated local inspection and no-write profile proposal |
 | `make plan PDF=/path/book.pdf BACKEND=pgvector` | None | None | Shows exact schema/provider apply boundary |
 | `make dry PDF=/path/book.pdf BACKEND=pgvector` | None | None | Validates the same boundary without clients |
 | `make ingest BACKEND=local-artifacts` | Optional correction provider | Local JSON | Documents plus raw page evidence |
@@ -35,6 +36,7 @@ codebook help plan               # exact help for one command
 codebook capabilities --json     # `capabilities` is an alias for `caps`
 codebook schema --json
 codebook robot-docs guide --json
+codebook configure --source /path/book.pdf --authorized --json
 ```
 
 Machine data is emitted on stdout; warnings and errors use stderr. Exit codes
@@ -44,6 +46,7 @@ retry contract is available from `codebook capabilities --json`.
 
 Unambiguous command and long-option typos are corrected with a warning. Unknown
 or ambiguous input fails with a next-step hint and does not execute a write.
+Authorization, apply, and overwrite flags are never inferred from typos.
 
 Set `OCR_MODE=off`, `auto`, or `always` on `make plan`, `make dry`, or `make ingest`. The CLI also
 accepts `--ocr-language`, `--ocr-dpi`, `--ocr-page-segmentation-mode`,

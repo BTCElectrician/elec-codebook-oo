@@ -1,6 +1,9 @@
 # Troubleshooting
 
 - `Source not found`: pass an absolute existing `.txt`, `.md`, or `.pdf` path.
+- `Confirm you may process this exact source`: verify authorization, then rerun `configure` with
+  `--authorized`; this permits local inspection, not ingestion or upload.
+- `Profile already exists`: choose another output or use `--overwrite --apply` only after review.
 - `PDF support is optional`: install `.[pdf]`.
 - `Tesseract OCR is required for this page`: install `.[ocr]` plus the local `tesseract` binary,
   or intentionally select `OCR_MODE=off`.

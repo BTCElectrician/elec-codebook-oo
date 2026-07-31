@@ -76,12 +76,12 @@ machine contract, Make targets, and agent entry points.
 ## If the task is to process a source
 
 1. Confirm the operator may process the exact source in the intended way.
-2. Run `make ask`.
-3. Copy the generic metadata-only profile outside git.
-4. Record edition, content ranges, printed-page offset, OCR policy, backend, and
-   embedding choice.
-5. Run `make plan` and `make dry`.
-6. Explain the exact deferred local path or database/schema target and every
+2. Run `codebook configure --source /absolute/path/book.pdf --authorized --json`.
+3. Explain the local inspection metrics and ask the unresolved questions rather than guessing.
+4. Adjust the returned profile command for edition, content ranges, printed-page offset, OCR
+   policy, backend, and embedding choice; run it with `--apply` only after review.
+5. Run the returned `plan` command and then `make dry`.
+6. Explain the exact local profile path, deferred artifact/database target, and every
    future provider boundary.
 7. Ask for approval immediately before `ingest --apply`.
 8. After indexing, run a representative search and verify source wording, PDF

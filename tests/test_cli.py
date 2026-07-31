@@ -1,7 +1,11 @@
 import json
+import shlex
+
+import pytest
 
 from codebook_agent import cli
 from codebook_agent.cli import CAPABILITIES, main
+from codebook_agent.core import load_profile
 
 
 def test_caps_contract_is_truthful(capsys):
@@ -18,6 +22,245 @@ def test_caps_contract_is_truthful(capsys):
     ]
 
 
+def test_configure_requires_explicit_source_authorization(tmp_path, capsys):
+    source = tmp_path / "manual.txt"
+    source.write_text("authorized only after operator confirmation", encoding="utf-8")
+
+    assert main(["configure", "--source", str(source), "--json"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--authorized" in captured.err
+
+    assert main(["configure", "--source", str(source), "--authorizd"]) == 1
+    typo = capsys.readouterr()
+    assert typo.out == ""
+    assert "inferred option `--authorized`" not in typo.err
+
+
+def test_configure_preview_is_local_deterministic_and_write_free(tmp_path, capsys):
+    source = tmp_path / "Safety Manual 2026.txt"
+    source.write_text("page one\fpage two", encoding="utf-8")
+    output = tmp_path / "profiles" / "safety.json"
+    arguments = [
+        "configure",
+        "--source",
+        str(source),
+        "--output",
+        str(output),
+        "--authorized",
+        "--json",
+    ]
+
+    assert main(arguments) == 0
+    first = capsys.readouterr()
+    assert main(arguments) == 0
+    second = capsys.readouterr()
+
+    assert first == second
+    payload = json.loads(first.out)
+    assert set(CAPABILITIES["output_schemas"]["profile-proposal"]["required"]) <= set(payload)
+    assert payload["operation"] == "codebook-configure"
+    assert payload["network"] is False
+    assert payload["provider_calls"] == []
+    assert payload["authorization_confirmed"] is True
+    assert payload["applied"] is False
+    assert payload["writes"] == []
+    assert payload["inspection"]["retained_text"] is False
+    assert "page one" not in first.out
+    assert payload["inspection"]["page_count"] == 2
+    assert payload["profile"]["edition"] == "2026"
+    assert payload["profile"]["content_ranges"] == {"main": [1, 2]}
+    assert payload["profile"]["ocr"]["mode"] == "off"
+    assert "--apply" in payload["commands"]["apply_profile"]
+    assert not output.exists()
+
+    assert main(shlex.split(payload["commands"]["apply_profile"])[1:] + ["--json"]) == 0
+    applied = json.loads(capsys.readouterr().out)
+    assert applied["applied"] is True
+    assert load_profile(output)["id"] == "safety-manual-2026"
+
+
+def test_configure_apply_writes_a_loadable_metadata_profile(tmp_path, capsys):
+    source = tmp_path / "installer-manual.md"
+    source.write_text("# Installation\n\nUse approved tools.", encoding="utf-8")
+    output = tmp_path / "profiles" / "installer.json"
+
+    assert (
+        main(
+            [
+                "configure",
+                "--source",
+                str(source),
+                "--output",
+                str(output),
+                "--id",
+                "installer-manual",
+                "--title",
+                "Installer Manual",
+                "--edition",
+                "R2",
+                "--content-range",
+                "definitions:1-1",
+                "--backend",
+                "pgvector",
+                "--embedding-provider",
+                "openai",
+                "--correction-mode",
+                "ocr-only",
+                "--correction-model",
+                "synthetic-corrector",
+                "--ocr-dpi",
+                "400",
+                "--max-chunk-chars",
+                "1200",
+                "--no-table-recovery",
+                "--authorized",
+                "--apply",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    profile = load_profile(output)
+
+    assert payload["writes"] == [str(output.resolve())]
+    assert profile["id"] == "installer-manual"
+    assert profile["title"] == "Installer Manual"
+    assert profile["edition"] == "R2"
+    assert profile["content_ranges"] == {"definitions": [1, 1]}
+    assert profile["backend"] == "pgvector"
+    assert profile["embedding"] == {
+        "provider": "openai",
+        "model": "text-embedding-3-small",
+    }
+    assert profile["correction"]["mode"] == "ocr-only"
+    assert profile["correction"]["model"] == "synthetic-corrector"
+    assert profile["ocr"]["dpi"] == 400
+    assert profile["max_chunk_chars"] == 1200
+    assert profile["structure"]["recover_tables"] is False
+    assert "source" not in profile
+
+    assert main(["plan", "--profile", str(output), "--pdf", str(source)]) == 0
+    plan = json.loads(capsys.readouterr().out)
+    assert plan["network"] is False
+    assert plan["apply"]["network"] == [
+        "configured PostgreSQL",
+        "OpenAI embeddings API",
+        "OpenAI text generation API",
+    ]
+
+
+def test_configure_refuses_unapproved_profile_replacement(tmp_path, capsys):
+    source = tmp_path / "manual.txt"
+    source.write_text("manual", encoding="utf-8")
+    output = tmp_path / "manual.json"
+    output.write_text('{"preserve": true}\n', encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "configure",
+                "--source",
+                str(source),
+                "--output",
+                str(output),
+                "--authorized",
+                "--apply",
+            ]
+        )
+        == 2
+    )
+    assert json.loads(output.read_text(encoding="utf-8")) == {"preserve": True}
+    assert "--overwrite --apply" in capsys.readouterr().err
+
+    assert (
+        main(
+            [
+                "configure",
+                "--source",
+                str(source),
+                "--output",
+                str(output),
+                "--authorized",
+                "--overwrite",
+                "--apply",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    assert load_profile(output)["id"] == "manual"
+    assert json.loads(capsys.readouterr().out)["applied"] is True
+
+
+def test_configure_reports_scanned_pdf_ocr_need(tmp_path, capsys):
+    pypdf = pytest.importorskip("pypdf")
+    source = tmp_path / "scanned-reference.pdf"
+    writer = pypdf.PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    with source.open("wb") as destination:
+        writer.write(destination)
+
+    assert (
+        main(
+            [
+                "configure",
+                "--source",
+                str(source),
+                "--authorized",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["inspection"]["low_text_page_ranges"] == [[1, 1]]
+    assert payload["inspection"]["ocr_recommended"] is True
+    assert payload["profile"]["ocr"]["mode"] == "auto"
+
+
+def test_configure_teaches_content_range_shape(tmp_path, capsys):
+    source = tmp_path / "manual.txt"
+    source.write_text("one\ftwo", encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "configure",
+                "--source",
+                str(source),
+                "--authorized",
+                "--content-range",
+                "definitions=1-2",
+            ]
+        )
+        == 1
+    )
+    error = capsys.readouterr().err
+    assert "--content-range TYPE:START-END" in error
+    assert "definitions:12-18" in error
+
+    assert (
+        main(
+            [
+                "configure",
+                "--source",
+                str(source),
+                "--authorized",
+                "--content-range",
+                "main:1-2",
+                "--content-range",
+                "definitions:2-2",
+            ]
+        )
+        == 1
+    )
+    overlap = capsys.readouterr().err
+    assert "overlaps main:1-2" in overlap
+    assert "one explicit content type" in overlap
+
+
 def test_ingest_refuses_without_apply(tmp_path, capsys):
     source = tmp_path / "book.txt"
     source.write_text("one", encoding="utf-8")
@@ -32,21 +275,15 @@ def test_local_ingest_and_export(tmp_path):
     assert main(["ingest", "--apply", "--pdf", str(source), "--artifacts", str(artifacts)]) == 0
     assert main(["export", "jsonl", "--artifacts", str(artifacts)]) == 0
     exported = artifacts / "local" / "generic-reference-template" / "documents.jsonl"
-    rows = [
-        json.loads(line)
-        for line in exported.read_text(encoding="utf-8").splitlines()
-    ]
+    rows = [json.loads(line) for line in exported.read_text(encoding="utf-8").splitlines()]
     assert len(rows) == 2
     assert rows[0]["schema_version"] == "2.2"
     assert rows[0]["pdf_page_start"] == 1
     assert rows[0]["source_sha256"]
     page_rows = json.loads(
-        (
-            artifacts
-            / "local"
-            / "generic-reference-template"
-            / "pages.json"
-        ).read_text(encoding="utf-8")
+        (artifacts / "local" / "generic-reference-template" / "pages.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert page_rows[0]["raw_text"] == "first\n\nsecond"
     assert page_rows[0]["schema_version"] == "1.0"
@@ -197,9 +434,7 @@ def test_pgvector_provider_only_override_uses_new_provider_default(tmp_path, cap
     assert embedding["model"] == "text-embedding-3-small"
 
 
-def test_pgvector_provider_only_override_drops_previous_provider_model(
-    tmp_path, capsys
-):
+def test_pgvector_provider_only_override_drops_previous_provider_model(tmp_path, capsys):
     source = tmp_path / "book.txt"
     source.write_text("synthetic", encoding="utf-8")
     profile = tmp_path / "profile.json"
@@ -429,9 +664,7 @@ def test_text_provider_errors_are_sanitized(capsys, monkeypatch):
     monkeypatch.setattr(
         cli,
         "command",
-        lambda args: (_ for _ in ()).throw(
-            SyntheticProviderError("secret-token-value")
-        ),
+        lambda args: (_ for _ in ()).throw(SyntheticProviderError("secret-token-value")),
     )
 
     assert main(["caps"]) == 4

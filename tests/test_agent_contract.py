@@ -31,7 +31,7 @@ def test_bare_invocation_is_a_safe_first_try(capsys):
     assert main([]) == 0
     captured = capsys.readouterr()
     assert "codebook agent --json" in captured.out
-    assert "ask -> plan -> dry" in captured.out
+    assert "configure -> plan -> dry" in captured.out
     assert captured.err == ""
 
 
@@ -45,6 +45,7 @@ def test_bare_invocation_is_a_safe_first_try(capsys):
         ["ask", "--help"],
         ["capabilities", "--help"],
         ["clean", "--help"],
+        ["configure", "--help"],
         ["doctor", "--help"],
         ["dry", "--help"],
         ["export", "--help"],
@@ -139,10 +140,7 @@ def test_apply_is_never_inferred_from_a_typo(tmp_path, capsys):
     marker = artifacts / "generated.txt"
     marker.write_text("generated", encoding="utf-8")
 
-    assert (
-        main(["clean", "--artifacts", str(artifacts), "--aply"])
-        == 1
-    )
+    assert main(["clean", "--artifacts", str(artifacts), "--aply"]) == 1
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "inferred option `--apply`" not in captured.err
@@ -159,6 +157,7 @@ def test_schema_discovery_is_deterministic(capsys):
         "contract_version": CLI_CONTRACT_VERSION,
         "schemas": OUTPUT_SCHEMAS,
     }
+    assert "profile-proposal" in OUTPUT_SCHEMAS
 
 
 def test_robot_guide_is_available_as_text_and_json(capsys):
@@ -242,9 +241,7 @@ def test_code_map_contract_paths_exist():
 def test_cross_model_entrypoints_defer_to_canonical_authority():
     claude = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
     gemini = (ROOT / "GEMINI.md").read_text(encoding="utf-8")
-    copilot = (ROOT / ".github" / "copilot-instructions.md").read_text(
-        encoding="utf-8"
-    )
+    copilot = (ROOT / ".github" / "copilot-instructions.md").read_text(encoding="utf-8")
     for text in (claude, gemini, copilot):
         assert "AGENTS.md" in text
         assert "CODEMAP.md" in text
@@ -295,6 +292,7 @@ def test_makefile_exposes_agent_native_discovery_targets():
     assert {
         "agent-json",
         "caps-json",
+        "configure",
         "doctor",
         "help",
         "robot-docs",
