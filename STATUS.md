@@ -2,9 +2,8 @@
 
 ## Current state
 
-Version 0.6.0 is the latest recorded version. The current unreleased worktree adds
-confidence-scored guided-configuration candidates to its local source inspection and metadata-only
-profile generation, evidence-preserving ingestion, real local OCR fallback, optional
+Version 0.7.0 adds confidence-scored guided-configuration candidates to its local source inspection
+and metadata-only profile generation, evidence-preserving ingestion, real local OCR fallback, optional
 model-based OCR correction, generic structure/table recovery, and citation-validated synthesis.
 Local JSON/JSONL remains the default. PostgreSQL/pgvector is the implemented searchable backend.
 
@@ -78,10 +77,10 @@ make pgvector-down
 
 ## Latest verified acceptance
 
-Verified locally on 2026-07-31 for the current unreleased configuration change:
+Verified locally on 2026-07-31 for v0.7.0:
 
 - focused CLI/agent contract lane: 69 passed;
 - `make check`: 98 passed, 2 real-service tests skipped by the credential-free default lane;
 - real local OCR lane: 1 passed, 1 skipped;
 - pgvector was not rerun because this change does not alter extraction, persistence, or retrieval;
-  the prior v0.6.0 acceptance covered 2 disposable pgvector tests, including OCR-to-retrieval.
+  the v0.6.0 acceptance covered 2 disposable pgvector tests, including OCR-to-retrieval.
