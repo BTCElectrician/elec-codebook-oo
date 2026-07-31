@@ -10,7 +10,7 @@ from .embeddings import SUPPORTED_EMBEDDING_PROVIDERS
 from .models import DOCUMENT_SCHEMA_VERSION, PAGE_SCHEMA_VERSION
 from .text_models import TEXT_MODEL_PROVIDERS
 
-CLI_CONTRACT_VERSION = "1.1"
+CLI_CONTRACT_VERSION = "1.2"
 
 EXIT_CODES = {
     "0": {
@@ -288,6 +288,7 @@ OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
             "provider_calls",
             "authorization_confirmed",
             "inspection",
+            "configuration_assessment",
             "profile",
             "profile_path",
             "applied",
@@ -296,7 +297,10 @@ OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
             "commands",
             "next",
         ],
-        "description": "Contains source metrics and profile metadata, never extracted text.",
+        "description": (
+            "Contains source metrics, labeled local candidates, and profile metadata; "
+            "never extracted text. Candidates are not profile authority."
+        ),
     },
     "retrieval": {
         "type": "object",

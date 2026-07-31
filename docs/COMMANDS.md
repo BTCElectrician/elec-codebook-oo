@@ -8,7 +8,7 @@
 | `make doctor` | None | None | Reports pgvector, PDFium, Tesseract, and URL presence |
 | `make caps-json` | None | None | Commands, capabilities, exit codes, environment, and change map |
 | `make ask` | None | None | Profile interview questions |
-| `make configure PDF=/path/book.pdf` | None | None | Authorization-gated local inspection and no-write profile proposal |
+| `make configure PDF=/path/book.pdf` | None | None | Authorization-gated local inspection, confidence-scored candidates, and no-write profile proposal |
 | `make plan PDF=/path/book.pdf BACKEND=pgvector` | None | None | Shows exact schema/provider apply boundary |
 | `make dry PDF=/path/book.pdf BACKEND=pgvector` | None | None | Validates the same boundary without clients |
 | `make ingest BACKEND=local-artifacts` | Optional correction provider | Local JSON | Documents plus raw page evidence |
@@ -63,3 +63,8 @@ and `GENERATION_MODEL` override the defaults.
 Set `SCHEMA`, `EMBEDDING_PROVIDER`, and `EMBEDDING_MODEL` when overriding profile values. Planning
 shows the effective values and whether document `search_text` will leave the process, but it does
 not connect to PostgreSQL or instantiate the provider.
+
+`configure` returns `configuration_assessment`: observed facts, deterministic local candidates,
+confidence/evidence, and unresolved decisions. A candidate is not applied to the metadata-only
+profile. Confirm it and supply the corresponding `--edition`, `--printed-page-offset`, or
+`--content-range` flag in the apply command.

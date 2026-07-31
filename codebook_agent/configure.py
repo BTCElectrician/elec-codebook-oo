@@ -23,6 +23,15 @@ CONTENT_RANGE_PATTERN = re.compile(
 )
 EDITION_PATTERN = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
 PROFILE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+PRINTED_PAGE_PATTERN = re.compile(
+    r"^(?:page\s+)?[\[(—-]*\s*(?P<page>[1-9][0-9]{0,4})\s*[\])—-]*$",
+    re.IGNORECASE,
+)
+SEMANTIC_RANGE_MARKERS = {
+    "front_matter": {"contents", "table of contents"},
+    "index": {"index"},
+    "annexes": {"appendix", "annex"},
+}
 
 
 class MissingSourceDependencyError(RuntimeError):
@@ -52,6 +61,197 @@ def _page_ranges(page_numbers: list[int]) -> list[list[int]]:
         start = previous = page
     ranges.append([start, previous])
     return ranges
+
+
+def _confidence(*, matches: int, total: int, minimum: int) -> dict[str, object]:
+    """Return a bounded confidence label without promoting a candidate to fact."""
+
+    consistency = matches / total if total else 0.0
+    if matches >= minimum and consistency >= 0.9:
+        level, score = "high", 0.9
+    elif matches >= minimum and consistency >= 0.67:
+        level, score = "medium", 0.67
+    else:
+        level, score = "low", 0.33
+    return {"level": level, "score": score}
+
+
+def _edge_lines(page: str) -> list[str]:
+    """Return only likely header/footer lines for local-only page-number analysis."""
+
+    lines = [line.strip() for line in page.splitlines() if line.strip()]
+    return [*lines[:3], *lines[-3:]]
+
+
+def _printed_page_candidates(pages: list[str]) -> list[dict[str, object]]:
+    """Infer a consistent PDF-to-printed offset from repeated edge-only page labels."""
+
+    offsets: dict[int, list[int]] = {}
+    labels_seen = 0
+    for pdf_page, page in enumerate(pages, start=1):
+        labels = {
+            int(match.group("page"))
+            for line in _edge_lines(page)
+            if (match := PRINTED_PAGE_PATTERN.fullmatch(line)) is not None
+        }
+        if len(labels) != 1:
+            continue
+        labels_seen += 1
+        printed_page = labels.pop()
+        offsets.setdefault(pdf_page - printed_page, []).append(pdf_page)
+
+    if labels_seen < 2:
+        return []
+    candidates: list[dict[str, object]] = []
+    for offset, pages_with_offset in sorted(offsets.items()):
+        confidence = _confidence(
+            matches=len(pages_with_offset), total=labels_seen, minimum=3
+        )
+        candidates.append(
+            {
+                "field": "printed_page_offset",
+                "candidate": offset,
+                "confidence": confidence,
+                "evidence": [
+                    {
+                        "kind": "repeated_edge_page_labels",
+                        "matching_pages": len(pages_with_offset),
+                        "labelled_pages": labels_seen,
+                        "pdf_page_ranges": _page_ranges(pages_with_offset),
+                    }
+                ],
+                "profile_effect": "operator must explicitly set --printed-page-offset",
+            }
+        )
+    return candidates
+
+
+def _semantic_range_candidate(pages: list[str]) -> dict[str, object] | None:
+    """Propose conservative semantic ranges from exact top-of-page section markers."""
+
+    detected: dict[str, list[int]] = {name: [] for name in SEMANTIC_RANGE_MARKERS}
+    for pdf_page, page in enumerate(pages, start=1):
+        lines = [line.strip().casefold() for line in page.splitlines() if line.strip()]
+        if not lines:
+            continue
+        first_line = re.sub(r"\s+", " ", lines[0]).strip(" .:-")
+        for content_type, markers in SEMANTIC_RANGE_MARKERS.items():
+            if first_line in markers:
+                detected[content_type].append(pdf_page)
+                break
+    detected = {name: values for name, values in detected.items() if values}
+    if not detected:
+        return None
+
+    ranges: dict[str, object] = {
+        name: _page_ranges(values) for name, values in sorted(detected.items())
+    }
+    assigned = {page for values in detected.values() for page in values}
+    main_pages = [page for page in range(1, len(pages) + 1) if page not in assigned]
+    if main_pages:
+        ranges["main"] = _page_ranges(main_pages)
+    marker_count = len(assigned)
+    return {
+        "field": "content_ranges",
+        "candidate": ranges,
+        "confidence": _confidence(
+            matches=marker_count, total=max(marker_count, 1), minimum=2
+        ),
+        "evidence": [
+            {
+                "kind": "exact_top_of_page_semantic_markers",
+                "marker_pages": marker_count,
+                "types": sorted(detected),
+            }
+        ],
+        "profile_effect": "operator must explicitly set each --content-range",
+    }
+
+
+def infer_configuration(
+    pages: list[str],
+    *,
+    source_name: str,
+    source_format: str,
+    native_text_pages: int,
+    low_text_pages: list[int],
+) -> dict[str, object]:
+    """Return deterministic, text-free configuration candidates for operator review.
+
+    The result deliberately separates measurements from suggestions. No candidate is applied to
+    a profile merely because it was found locally.
+    """
+
+    page_count = len(pages)
+    text_lengths = [len(page.strip()) for page in pages]
+    heading_like_pages = sum(
+        bool(re.search(r"(?m)^[A-Z][A-Z0-9 .,:;/-]{2,80}$", page)) for page in pages
+    )
+    table_like_pages = sum("\t" in page or "|" in page for page in pages)
+    candidates: list[dict[str, object]] = []
+    edition_match = EDITION_PATTERN.search(Path(source_name).stem)
+    if edition_match:
+        candidates.append(
+            {
+                "field": "edition",
+                "candidate": edition_match.group(0),
+                "confidence": {"level": "medium", "score": 0.67},
+                "evidence": [{"kind": "source_filename_four_digit_year", "matches": 1}],
+                "profile_effect": "operator must explicitly set --edition",
+            }
+        )
+    candidates.extend(_printed_page_candidates(pages))
+    semantic_ranges = _semantic_range_candidate(pages)
+    if semantic_ranges is not None:
+        candidates.append(semantic_ranges)
+    candidates.append(
+        {
+            "field": "ocr.mode",
+            "candidate": "auto" if low_text_pages else "off",
+            "confidence": {"level": "high", "score": 0.9},
+            "evidence": [
+                {
+                    "kind": "native_text_density",
+                    "low_text_pages": len(low_text_pages),
+                    "page_count": page_count,
+                }
+            ],
+            "profile_effect": "used as the safe default; operator may override --ocr-mode",
+        }
+    )
+    candidates.append(
+        {
+            "field": "structure",
+            "candidate": {"enabled": True, "recover_tables": True},
+            "confidence": {"level": "low", "score": 0.33},
+            "evidence": [
+                {
+                    "kind": "layout_shape",
+                    "heading_like_pages": heading_like_pages,
+                    "table_like_pages": table_like_pages,
+                }
+            ],
+            "profile_effect": "generic defaults only; not evidence of document semantics",
+        }
+    )
+    return {
+        "inference_version": "1.0",
+        "observed_facts": {
+            "source_format": source_format,
+            "page_count": page_count,
+            "native_text_pages": native_text_pages,
+            "low_text_pages": len(low_text_pages),
+            "layout_characteristics": {
+                "nonempty_text_pages": sum(bool(length) for length in text_lengths),
+                "text_character_count": sum(text_lengths),
+                "heading_like_pages": heading_like_pages,
+                "table_like_pages": table_like_pages,
+            },
+        },
+        "inferred_candidates": candidates,
+        "authority": "Candidates are local, deterministic suggestions only; operator choices own profile fields.",
+        "retained_text": False,
+    }
 
 
 def inspect_source(source_path: Path, *, min_native_characters: int = 40) -> dict[str, Any]:
@@ -89,13 +289,14 @@ def inspect_source(source_path: Path, *, min_native_characters: int = 40) -> dic
             reader = PdfReader(str(source))
             low_text_pages = []
             native_text_pages = 0
+            raw_pages = []
             for number, page in enumerate(reader.pages, start=1):
                 text = page.extract_text() or ""
+                raw_pages.append(text)
                 if native_text_is_usable(text, min_characters=min_native_characters):
                     native_text_pages += 1
                 else:
                     low_text_pages.append(number)
-            raw_pages = [""] * len(reader.pages)
         except Exception as error:
             raise ValueError(
                 f"Could not inspect PDF '{source.name}': {type(error).__name__}. "
@@ -106,7 +307,13 @@ def inspect_source(source_path: Path, *, min_native_characters: int = 40) -> dic
     if page_count < 1:
         raise ValueError(f"Source contains no pages: {source}")
     ocr_recommended = suffix == ".pdf" and bool(low_text_pages)
-    edition_match = EDITION_PATTERN.search(source.stem)
+    assessment = infer_configuration(
+        raw_pages,
+        source_name=source.name,
+        source_format=suffix.removeprefix("."),
+        native_text_pages=native_text_pages,
+        low_text_pages=low_text_pages,
+    )
     return {
         "path": str(source),
         "format": suffix.removeprefix("."),
@@ -121,7 +328,7 @@ def inspect_source(source_path: Path, *, min_native_characters: int = 40) -> dic
             "tesseract": shutil.which("tesseract") is not None,
         },
         "inferred_title": source.stem.replace("_", " ").strip(),
-        "inferred_edition": edition_match.group(0) if edition_match else None,
+        "configuration_assessment": assessment,
         "network": False,
         "retained_text": False,
     }
@@ -209,7 +416,7 @@ def propose_profile(
             "Profile id must be 1-128 letters, digits, dots, underscores, or hyphens. "
             "Use --id with a stable value such as electrical-manual-2026."
         )
-    selected_edition = edition or inspection.get("inferred_edition")
+    selected_edition = edition
     if max_chunk_chars < 200:
         raise ValueError("max_chunk_chars must be at least 200. Use --max-chunk-chars 200 or more.")
     profile.update(
@@ -273,28 +480,50 @@ def unresolved_decisions(
                 "reason": "The tool cannot determine copyright, license, contract, or access rights.",
             }
         )
+    candidates = list(
+        dict(inspection.get("configuration_assessment") or {}).get("inferred_candidates") or []
+    )
+    candidate_fields = {str(candidate.get("field")) for candidate in candidates}
     if "edition" not in profile:
+        edition_reason = (
+            "A local filename candidate is shown separately, but citations need an operator-"
+            "confirmed edition."
+            if "edition" in candidate_fields
+            else "No edition candidate was found during local inspection."
+        )
         decisions.append(
             {
                 "field": "edition",
                 "question": "What edition or revision should citations identify?",
-                "reason": "No unambiguous four-digit edition was found in the filename.",
+                "reason": edition_reason,
             }
         )
     if profile.get("printed_page_offset") is None:
+        page_reason = (
+            "A local repeated-label candidate is shown separately, but the mapping remains "
+            "untrusted until verified."
+            if "printed_page_offset" in candidate_fields
+            else "No consistent repeated page labels were found locally."
+        )
         decisions.append(
             {
                 "field": "printed_page_offset",
                 "question": "How do printed page numbers differ from PDF page numbers?",
-                "reason": "Page-number mappings require operator verification.",
+                "reason": page_reason,
             }
         )
     if not explicit_content_ranges:
+        range_reason = (
+            "A local semantic-range candidate is shown separately, but the safe profile still "
+            "uses all pages as main content."
+            if "content_ranges" in candidate_fields
+            else "The safe proposal treats all pages as main content."
+        )
         decisions.append(
             {
                 "field": "content_ranges",
                 "question": "Should front matter, definitions, tables, or annexes use separate ranges?",
-                "reason": "The safe proposal treats all pages as main content.",
+                "reason": range_reason,
             }
         )
     if inspection["ocr_recommended"]:

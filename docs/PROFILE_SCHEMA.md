@@ -8,10 +8,21 @@ Generate a safe starting point without copying the template by hand:
 codebook configure --source /absolute/path/book.pdf --authorized --json
 ```
 
-The preview returns the proposed profile, local OCR assessment, unresolved decisions, and an exact
-`apply_profile` command. It retains no extracted text and makes no network or provider call. The
-profile is written only when that command includes `--apply`; an existing profile also requires
-`--overwrite`.
+The preview returns observed source facts, local confidence-scored candidates, the proposed profile,
+unresolved decisions, and an exact `apply_profile` command. Candidates carry evidence counts but no
+extracted text. They are not profile authority: the profile keeps safe defaults until the operator
+explicitly supplies `--edition`, `--printed-page-offset`, or `--content-range`. The preview makes no
+network or provider call. The profile is written only when that command includes `--apply`; an
+existing profile also requires `--overwrite`.
+
+`configuration_assessment` is an output-only review packet, not stored profile content. Its
+`observed_facts` are measurements; its `inferred_candidates` are deterministic local suggestions
+with `confidence`, evidence counts, and a `profile_effect`. The current slice can use a filename
+year, repeated edge page labels, exact top-of-page `contents`/`index`/`appendix`/`annex` markers,
+and coarse heading/table shape. It does not infer arbitrary document semantics, printed mappings
+from body references, edition authority, or a custom schema. It does not call a model for
+configuration inference; any future model-assisted path must be an explicit provider and data-boundary
+plan rather than a hidden fallback.
 
 The command accepts the same OCR, correction, and embedding overrides used by planning, plus
 `--content-range`, `--printed-page-offset`, `--max-chunk-chars`, `--no-structure`, and
