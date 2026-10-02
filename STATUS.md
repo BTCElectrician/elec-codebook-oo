@@ -102,5 +102,8 @@ Verified locally on 2026-10-02 for the unreleased schema 2.3 changes (Python 3.1
 - disposable pgvector lane (pgvector 0.8.7): 3 passed, including re-ingest after chunk renumbering
   and OCR-to-retrieval;
 - full suite on Python 3.13 with the disposable database: 121 passed;
+- README quickstart from a clean clone (pip, `.[pdf,ocr,postgres]`): `doctor`, `agent-json`,
+  `configure`, `plan`, `dry`, `ingest`, `export`, `smoke`, and pgvector `ingest`/`search`/`answer`
+  passed; Docker image build and in-container `smoke` passed as non-root UID 10001;
 - 12 of the 15 identity regression tests fail on the v0.7.0 code and pass now; the other 3 guard
   against over-correction.
