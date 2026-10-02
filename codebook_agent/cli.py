@@ -18,7 +18,7 @@ from .agent_contract import (
     capabilities,
 )
 from .answers import answer_from_results, synthesize_answer
-from .backends.local import export_jsonl, write_documents, write_pages
+from .backends.local import export_jsonl, write_bundle
 from .cli_surface import (
     DEFAULT_PROFILE,
     DEFAULT_SOURCE,
@@ -45,10 +45,8 @@ from .configure import (
 from .core import build_bundle, load_profile, plan
 from .correction import CorrectionConfig
 from .embeddings import build_embedding_provider, resolve_embedding_selection
-from .text_models import (
-    DEFAULT_OPENAI_TEXT_MODEL,
-    build_text_provider,
-)
+from .model_defaults import DEFAULT_SYNTHESIS_MODEL
+from .text_models import build_text_provider
 
 EXIT_SUCCESS = 0
 EXIT_INPUT = 1
@@ -392,10 +390,10 @@ def command(args: argparse.Namespace) -> int:
             rejected_corrections = sum(
                 page.correction_status == "rejected" for page in bundle.pages
             )
-            destination = write_documents(args.artifacts, str(profile["id"]), documents)
-            pages_destination = write_pages(
+            destination, pages_destination = write_bundle(
                 args.artifacts,
                 str(profile["id"]),
+                documents,
                 bundle.pages,
             )
             _json(
@@ -490,7 +488,7 @@ def command(args: argparse.Namespace) -> int:
             profile = load_profile(args.profile)
             provider, model = resolve_embedding_selection(profile)
             synthesis_provider = args.generation_provider or "openai"
-            synthesis_model = args.generation_model or DEFAULT_OPENAI_TEXT_MODEL
+            synthesis_model = args.generation_model or DEFAULT_SYNTHESIS_MODEL
             _json(
                 {
                     "contract_version": CLI_CONTRACT_VERSION,
@@ -530,7 +528,7 @@ def command(args: argparse.Namespace) -> int:
             generation_provider = build_text_provider(
                 args.generation_provider or "openai",
                 api_key=os.getenv("OPENAI_API_KEY"),
-                model=args.generation_model or DEFAULT_OPENAI_TEXT_MODEL,
+                model=args.generation_model or DEFAULT_SYNTHESIS_MODEL,
             )
             answer = synthesize_answer(
                 args.query,
@@ -580,8 +578,9 @@ def command(args: argparse.Namespace) -> int:
             profile = load_profile(DEFAULT_PROFILE)
             bundle = build_bundle(profile, DEFAULT_SOURCE)
             documents = bundle.documents
-            destination = write_documents(root, str(profile["id"]), documents)
-            pages_destination = write_pages(root, str(profile["id"]), bundle.pages)
+            destination, pages_destination = write_bundle(
+                root, str(profile["id"]), documents, bundle.pages
+            )
             exported = export_jsonl(root, str(profile["id"]))
             exported_rows = [
                 json.loads(line)

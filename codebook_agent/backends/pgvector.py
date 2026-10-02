@@ -168,7 +168,11 @@ class PgVectorBackend:
         embedding_model: str,
         pages: Sequence[PageText] | None = None,
     ) -> int:
-        """Atomically replace one corpus, using upserts and stale-row deletion."""
+        """Atomically replace one corpus, using upserts and stale-row deletion.
+
+        Unchanged documents keep their rows; every other row of the corpus is
+        replaced in the same transaction.
+        """
 
         if not documents:
             raise ValueError("Refusing to index an empty corpus.")
@@ -176,12 +180,16 @@ class PgVectorBackend:
             raise ValueError("Document and embedding counts differ.")
         if any(len(embedding) != EMBEDDING_DIMENSIONS for embedding in embeddings):
             raise ValueError(f"Every embedding must have {EMBEDDING_DIMENSIONS} dimensions.")
-
-        self.ensure_schema()
-        _, register_vector, sql, Jsonb, _ = _postgres_imports()
         corpus_id = documents[0].corpus_id
         if any(document.corpus_id != corpus_id for document in documents):
             raise ValueError("A single indexing operation cannot mix corpus IDs.")
+        if len({document.id for document in documents}) != len(documents):
+            raise ValueError("Refusing to index duplicate document IDs.")
+        if len({document.chunk_number for document in documents}) != len(documents):
+            raise ValueError("Refusing to index duplicate chunk numbers.")
+
+        self.ensure_schema()
+        _, register_vector, sql, Jsonb, _ = _postgres_imports()
 
         corpus_query = sql.SQL(
             """
@@ -240,8 +248,18 @@ class PgVectorBackend:
                 updated_at = now()
             """
         ).format(sql.Identifier(self.schema))
+        # Keep a row only when the new corpus has the same id at the same chunk
+        # number. Stable ids can move to a new position when an earlier page
+        # changes; deleting those rows first keeps the per-corpus chunk-number
+        # uniqueness constraint satisfied during the upsert.
         delete_stale_query = sql.SQL(
-            "DELETE FROM {}.documents WHERE corpus_id = %s AND NOT (id = ANY(%s))"
+            """
+            DELETE FROM {}.documents
+            WHERE corpus_id = %s
+              AND (id, chunk_number) NOT IN (
+                  SELECT * FROM unnest(%s::text[], %s::bigint[])
+              )
+            """
         ).format(sql.Identifier(self.schema))
         page_query = sql.SQL(
             """
@@ -316,7 +334,14 @@ class PgVectorBackend:
                         list(embedding),
                     )
                 )
-            cursor.execute(delete_stale_query, (corpus_id, [document.id for document in documents]))
+            cursor.execute(
+                delete_stale_query,
+                (
+                    corpus_id,
+                    [document.id for document in documents],
+                    [document.chunk_number for document in documents],
+                ),
+            )
             cursor.executemany(document_query, rows)
             if pages is not None:
                 page_rows = [

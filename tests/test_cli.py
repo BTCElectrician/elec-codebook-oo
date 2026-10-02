@@ -19,7 +19,11 @@ def test_caps_contract_is_truthful(capsys):
     assert payload["implemented_structure_recovery"] == [
         "generic-blocks",
         "continued-tables",
+        "heading-derived-identity",
+        "page-furniture-exclusion",
+        "duplicate-chunk-collapse",
     ]
+    assert payload["default_models"]["synthesis"]["provider"] == "openai"
 
 
 def test_configure_requires_explicit_source_authorization(tmp_path, capsys):
@@ -409,6 +413,28 @@ def test_ingest_refuses_without_apply(tmp_path, capsys):
     assert "Refusing to write" in capsys.readouterr().err
 
 
+def test_failed_local_ingest_leaves_previous_artifacts_consistent(tmp_path, monkeypatch):
+    source = tmp_path / "book.txt"
+    source.write_text("first\n\nsecond", encoding="utf-8")
+    artifacts = tmp_path / "artifacts"
+    assert main(["ingest", "--apply", "--pdf", str(source), "--artifacts", str(artifacts)]) == 0
+    target = artifacts / "local" / "generic-reference-template"
+    before = {name: (target / name).read_bytes() for name in ("documents.json", "pages.json")}
+
+    from codebook_agent.models import PageText
+
+    def fail(self):
+        raise RuntimeError("simulated failure while serializing page evidence")
+
+    monkeypatch.setattr(PageText, "to_dict", fail)
+    source.write_text("changed first\n\nchanged second", encoding="utf-8")
+    assert main(["ingest", "--apply", "--pdf", str(source), "--artifacts", str(artifacts)]) != 0
+
+    after = {name: (target / name).read_bytes() for name in ("documents.json", "pages.json")}
+    assert after == before
+    assert sorted(path.name for path in target.iterdir()) == ["documents.json", "pages.json"]
+
+
 def test_local_ingest_and_export(tmp_path):
     source = tmp_path / "book.txt"
     source.write_text("first\n\nsecond", encoding="utf-8")
@@ -418,7 +444,7 @@ def test_local_ingest_and_export(tmp_path):
     exported = artifacts / "local" / "generic-reference-template" / "documents.jsonl"
     rows = [json.loads(line) for line in exported.read_text(encoding="utf-8").splitlines()]
     assert len(rows) == 2
-    assert rows[0]["schema_version"] == "2.2"
+    assert rows[0]["schema_version"] == "2.3"
     assert rows[0]["pdf_page_start"] == 1
     assert rows[0]["source_sha256"]
     page_rows = json.loads(

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-DOCUMENT_SCHEMA_VERSION = "2.2"
+DOCUMENT_SCHEMA_VERSION = "2.3"
 PAGE_SCHEMA_VERSION = "1.0"
 EMBEDDING_DIMENSIONS = 1536
 
@@ -108,6 +108,15 @@ class SearchResult:
                 )
             else:
                 parts.append(f"printed page {self.document.printed_page_start}")
+        duplicates = self.document.metadata.get("duplicate_locations")
+        if isinstance(duplicates, list):
+            also = [
+                str(item["pdf_page_start"])
+                for item in duplicates
+                if isinstance(item, dict) and isinstance(item.get("pdf_page_start"), int)
+            ]
+            if also:
+                parts.append(f"same text also on PDF page{'s' if len(also) > 1 else ''} {', '.join(also)}")
         page_evidence = self.document.metadata.get("page_evidence")
         has_ocr_page = isinstance(page_evidence, list) and any(
             isinstance(value, dict)

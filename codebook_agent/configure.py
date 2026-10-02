@@ -444,7 +444,8 @@ def propose_profile(
     profile["ocr"] = ocr
     correction = dict(profile["correction"])
     correction.update(correction_overrides or {})
-    CorrectionConfig.from_profile(correction)
+    # Pin the resolved default so a generated profile records the model it will use.
+    correction["model"] = CorrectionConfig.from_profile(correction).model
     profile["correction"] = correction
     embedding_provider_name, embedding_model_name = resolve_embedding_selection(
         profile,
