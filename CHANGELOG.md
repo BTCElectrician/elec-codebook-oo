@@ -7,7 +7,36 @@ existed.
 
 ## [Unreleased]
 
-No unreleased changes yet.
+### Fixed
+
+- Article/section identity now comes only from a heading on a chunk's first line. Before this,
+  a chunk could be labeled from a number-led sentence (`1.25 times ...`), a prose reference
+  (`Article 4 requirements ...`), the first word of a length-split continuation, or the previous
+  article's last section after a new article began. A heading inside a single-newline paragraph
+  now starts its own chunk instead of hiding under the earlier section's label.
+- Running headers, footers, and page numbers repeated at nearby page edges are no longer indexed
+  as chunks or used as identity. Page evidence keeps them; `"page_furniture": "off"` restores the
+  old behavior.
+- Identical chunks with the same identity (for example a page duplicated in a scan) are indexed
+  once, with the other locations in `metadata.duplicate_locations` and the citation.
+- Document ids no longer include a corpus-wide chunk counter or the source hash, so an edit on one
+  page leaves the ids on other pages unchanged. pgvector re-ingest now handles a stable id moving
+  to a new `chunk_number` without violating the per-corpus uniqueness constraint, and rejects
+  duplicate ids or chunk numbers before connecting.
+- Local ingest writes `documents.json` and `pages.json` as one unit; a failure while writing no
+  longer leaves new documents beside old page evidence.
+
+### Changed
+
+- Document schema version 2.3 (new id derivation; `metadata.identity_source`,
+  `metadata.identity_version`, `metadata.duplicate_locations`, and per-page
+  `furniture_lines_removed`). Re-ingest existing corpora to adopt it.
+- Default models now live in `codebook_agent/model_defaults.py`: OCR correction `gpt-6-luna`
+  (was `gpt-5.6-terra`), answer synthesis `gpt-6.1-sol` (was `gpt-5.6-terra`), embeddings
+  `text-embedding-3-small` (unchanged). Bundled profiles inherit the correction default instead
+  of pinning a model, and `capabilities --json` reports `default_models`.
+- Raised dependency floors for untrusted-input parsers: `pypdf>=6.0`, `pillow>=10.3`.
+- CI runs on Python 3.11 and 3.13.
 
 ## [0.7.0] - 2026-07-31
 

@@ -30,7 +30,9 @@ Treat OCR output as uncertain evidence: preserve `ocr-tesseract` provenance and 
 never silently relabel it as native source text. Model correction must preserve raw text, record
 the provider/model and acceptance decision, and reject changes to protected identifiers. Synthesis
 must use retrieved evidence labels and fall back to extractive output when citation validation
-fails.
+fails. Article/section identity comes only from a heading that opens a chunk (`identity.py`); never
+derive it from running headers, cross-references, or model output. Default model names live only
+in `codebook_agent/model_defaults.py`.
 
 For code changes, use `docs/CODEMAP.md` to find the owning contract and focused tests. Keep
 machine-readable data on stdout and warnings/errors on stderr. Preserve the documented exit-code
