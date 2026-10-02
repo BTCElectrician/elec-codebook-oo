@@ -34,7 +34,7 @@ without explicit flags.
 ## Boundaries
 
 ```text
-authorized source -> configure proposal -> approved profile -> native extractor -> optional OCR -> optional correction -> structure -> CodebookDocument v2.2 -> backend -> SearchResult -> answer
+authorized source -> configure proposal -> approved profile -> native extractor -> optional OCR -> optional correction -> structure -> identity -> CodebookDocument v2.3 -> backend -> SearchResult -> answer
 ```
 
 - Extraction owns source identity and page evidence.
@@ -50,8 +50,24 @@ authorized source -> configure proposal -> approved profile -> native extractor 
 optional synthetic page boundary. PDFs first use pypdf. In `auto` mode, pages without enough native
 text are rendered locally through PDFium and processed by Tesseract. `PageText` retains raw and
 selected text, extraction/OCR provenance, and any correction decision. The structure pass labels
-generic blocks and joins explicitly continued delimited tables. `documents_from_pages` carries
-generic article/section context forward, applies content types, and creates deterministic IDs.
+generic blocks and joins explicitly continued delimited tables. `documents_from_pages` removes
+running headers and footers from chunk text, splits blocks at heading lines, takes article/section
+identity only from a heading that opens a chunk (carrying it forward otherwise), collapses identical
+chunks that share an identity, applies content types, and creates deterministic ids.
+
+## Identity
+
+`codebook_agent/identity.py` owns chunk identity. A heading is a line such as `3.1 Scope` or
+`Article 3. Grounding`; number-led prose, prose references to an article, and lines that continue
+the previous sentence are not headings. Only the first piece of a split paragraph may carry a
+heading, and an article heading clears the previous section. Page furniture is a line that repeats,
+ignoring numbers, among the first or last two lines of pages at most two apart; a furniture
+candidate that also parses as a heading needs the identical line on nearby pages or the same
+multi-word pattern on three pages. Table titles and table rows are never furniture.
+
+A document id hashes the corpus id, the chunk's page span, its ordinal within that span, and its
+text. It does not include a global chunk counter or the source hash, so unchanged pages keep their
+ids when another page changes. `chunk_number` remains the corpus-wide reading order.
 
 Both local JSON and pgvector receive the same `CodebookDocument` representation. Local
 `pages.json` and the pgvector `pages` table preserve the raw page record independently from
@@ -89,10 +105,14 @@ result in disposable pgvector and retrieves the invented wording.
 
 The adapter uses a bounded Psycopg connection pool. Migrations create the vector extension and an
 isolated schema, then create `corpora`, `documents`, and `pages`. Indexing upserts the corpus,
-documents, and page evidence and deletes stale rows in one transaction.
+documents, and page evidence in one transaction. Rows whose id and chunk number both survive are
+updated in place; all other rows of the corpus are deleted first, which keeps the per-corpus
+`chunk_number` uniqueness constraint valid when a stable id moves to a new position.
 
 Search obtains vector and full-text candidates independently, then combines their ranks with
-reciprocal-rank fusion. Results are converted back into backend-neutral `SearchResult` objects.
+reciprocal-rank fusion. The vector candidates are ordered by exact cosine distance (the window
+function forces a sort), so the approximate HNSW index is not used and a corpus or content-type
+filter cannot truncate them. Results are converted back into backend-neutral `SearchResult` objects.
 
 ## Answers
 

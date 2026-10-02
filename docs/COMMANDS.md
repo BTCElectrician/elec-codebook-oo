@@ -58,7 +58,7 @@ extracted text boundary would leave the process.
 
 Set `ANSWER_MODE=synthesized` for optional generation. Use the CLI's `answer --plan` first to
 preview database, embedding, and generation boundaries without connecting. `GENERATION_PROVIDER`
-and `GENERATION_MODEL` override the defaults.
+and `GENERATION_MODEL` override the defaults in `codebook_agent/model_defaults.py`.
 
 Set `SCHEMA`, `EMBEDDING_PROVIDER`, and `EMBEDDING_MODEL` when overriding profile values. Planning
 shows the effective values and whether document `search_text` will leave the process, but it does

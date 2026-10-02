@@ -44,6 +44,9 @@ Optional:
 - `content_ranges`
 - `printed_page_offset`
 - `max_chunk_chars` (minimum 200, default 1800)
+- `page_furniture`: `auto` (default) leaves repeated page-edge lines such as running headers,
+  footers, and page numbers out of chunk text and identity; `off` keeps them. Page evidence keeps
+  them either way.
 - `ocr.mode`: `off`, `auto`, or `always`
 - `ocr.engine`: `tesseract`
 - `ocr.language`: installed Tesseract language, default `eng`
@@ -53,13 +56,14 @@ Optional:
 - `ocr.timeout_seconds`: per-page timeout, 1-600
 - `correction.mode`: `off`, `ocr-only`, or `all` (default `off`)
 - `correction.provider`: currently `openai`
-- `correction.model`
+- `correction.model`: omit to use the default in `codebook_agent/model_defaults.py`; generated
+  profiles record the resolved model
 - `correction.min_similarity`: 0-1, default 0.82
 - `correction.max_length_change_ratio`: 0-1, default 0.20
 - `structure.enabled`: enable generic block recovery
 - `structure.recover_tables`: join explicitly continued delimited tables
 - `embedding.provider`: `hash` or `openai`
-- `embedding.model`
+- `embedding.model`: omit to use the provider default in `codebook_agent/model_defaults.py`
 
 Embedding configuration is validated during profile loading and planning without importing a
 provider SDK or creating a client. The hash provider accepts only `codebook-hash-v1`; OpenAI model
