@@ -128,11 +128,11 @@ make test-pgvector
 make pgvector-down
 ```
 
-Example result:
+Example result (first passage of `make search`):
 
 ```text
-Article 1. A branch circuit is a circuit that supplies one or more outlets.
-Source: source.txt, Article 1, PDF page 1
+1. Article 1. A branch circuit is a circuit that supplies one or more outlets. This synthetic text is not a code requirement.
+   Source: source.txt, Article 1, PDF page 1
 ```
 
 ## Architecture
