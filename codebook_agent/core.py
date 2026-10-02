@@ -5,13 +5,22 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 from .backends.pgvector import validate_schema_name
 from .correction import CorrectionConfig, correct_pages
 from .embeddings import resolve_embedding_selection
+from .identity import (
+    IDENTITY_VERSION,
+    IdentityState,
+    find_page_furniture,
+    leading_heading,
+    page_furniture_mode,
+    split_at_headings,
+    strip_page_furniture,
+)
 from .models import DOCUMENT_SCHEMA_VERSION, CodebookDocument, PageText
 from .ocr import OCRConfig, TesseractOCR, native_text_is_usable
 from .structure import StructureConfig, recover_structure
@@ -19,14 +28,6 @@ from .text_models import TextModelProvider
 
 SUPPORTED_BACKENDS = {"local-artifacts", "pgvector"}
 PROFILE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-ARTICLE_PATTERN = re.compile(
-    r"^\s*Article\s+(?P<number>[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*)"
-    r"(?:\s*[-—:]\s*|\.\s*)?(?P<title>[^\n]*)",
-    re.IGNORECASE,
-)
-SECTION_PATTERN = re.compile(
-    r"^\s*(?P<number>\d+(?:\.\d+)+(?:\([A-Za-z0-9]+\))*)\s*(?P<title>[^\n]*)"
-)
 PARAGRAPH_PATTERN = re.compile(r"\n\s*\n")
 
 
@@ -56,6 +57,7 @@ def load_profile(path: Path) -> dict[str, Any]:
     OCRConfig.from_profile(profile.get("ocr"))
     CorrectionConfig.from_profile(profile.get("correction"))
     StructureConfig.from_profile(profile.get("structure"))
+    page_furniture_mode(profile)
     resolve_embedding_selection(profile)
     return profile
 
@@ -332,23 +334,70 @@ def _split_table(table: str, max_chars: int) -> list[str]:
     return chunks
 
 
-def _metadata_context(
-    text: str,
-    *,
-    article_number: str | None,
-    article_title: str | None,
-    section_number: str | None,
-    section_title: str | None,
-) -> tuple[str | None, str | None, str | None, str | None]:
-    article_match = ARTICLE_PATTERN.match(text)
-    if article_match:
-        article_number = article_match.group("number").strip() or article_number
-        article_title = article_match.group("title").strip(" .-—:") or article_title
-    section_match = SECTION_PATTERN.match(text)
-    if section_match:
-        section_number = section_match.group("number").strip() or section_number
-        section_title = section_match.group("title").strip(" .-—:") or section_title
-    return article_number, article_title, section_number, section_title
+def _evidence_hash(page: PageText) -> str:
+    return hashlib.sha256(
+        (page.raw_text if page.raw_text is not None else page.text).encode()
+    ).hexdigest()
+
+
+@dataclass(frozen=True)
+class _Block:
+    """A unit of source text to chunk, with the original pages it came from."""
+
+    text: str
+    content_type: str
+    pdf_page_start: int
+    pdf_page_end: int
+    printed_page_start: int | None
+    printed_page_end: int | None
+    source_pages: tuple[int, ...]
+    is_table: bool = False
+    metadata: dict[str, Any] | None = None
+
+
+def _blocks(profile: dict[str, Any], pages: list[PageText]) -> list[_Block]:
+    structure_config = profile.get("structure")
+    if isinstance(structure_config, dict) and structure_config.get("enabled"):
+        blocks = []
+        for block in recover_structure(profile, pages):
+            configured = _content_type(profile, block.pdf_page_start)
+            blocks.append(
+                _Block(
+                    text=block.text,
+                    content_type=block.content_type if block.content_type != "main" else configured,
+                    pdf_page_start=block.pdf_page_start,
+                    pdf_page_end=block.pdf_page_end,
+                    printed_page_start=block.printed_page_start,
+                    printed_page_end=block.printed_page_end,
+                    source_pages=tuple(
+                        block.metadata.get(
+                            "source_pages",
+                            range(block.pdf_page_start, block.pdf_page_end + 1),
+                        )
+                    ),
+                    is_table=block.metadata.get("structure_kind") == "table",
+                    metadata=dict(block.metadata),
+                )
+            )
+        return blocks
+    return [
+        _Block(
+            text=paragraph,
+            content_type=_content_type(profile, page.pdf_page),
+            pdf_page_start=page.pdf_page,
+            pdf_page_end=page.pdf_page,
+            printed_page_start=page.printed_page,
+            printed_page_end=page.printed_page,
+            source_pages=(page.pdf_page,),
+        )
+        for page in pages
+        for paragraph in (part.strip() for part in PARAGRAPH_PATTERN.split(page.text))
+        if paragraph
+    ]
+
+
+def _single_or_mixed(values: set[Any]) -> Any:
+    return next(iter(values)) if len(values) == 1 else "mixed"
 
 
 def documents_from_pages(
@@ -358,90 +407,84 @@ def documents_from_pages(
     *,
     source_hash: str,
 ) -> list[CodebookDocument]:
-    """Shape page-local chunks while carrying article and section context forward."""
+    """Shape page-cited chunks whose identity comes from source structure.
+
+    Article/section identity is taken only from a heading that opens a chunk and
+    is otherwise carried forward in reading order (see ``identity``). Repeated
+    page-edge lines (running headers/footers) are excluded from chunk text and
+    identity while the page evidence keeps them. Document ids depend on the
+    chunk's own page span, position within that span, and text, so a change on
+    one page does not renumber every later chunk. Identical chunks with the same
+    identity are indexed once and list their other locations.
+    """
 
     max_chars = int(profile.get("max_chunk_chars", 1800))
     if max_chars < 200:
         raise ValueError("max_chunk_chars must be at least 200.")
-    documents: list[CodebookDocument] = []
-    article_number: str | None = None
-    article_title: str | None = None
-    section_number: str | None = None
-    section_title: str | None = None
-    chunk_number = 0
+    furniture = find_page_furniture(pages) if page_furniture_mode(profile) == "auto" else set()
+    original = {page.pdf_page: page for page in pages}
+    furniture_removed: dict[int, int] = {}
+    chunk_pages: list[PageText] = []
+    for page in pages:
+        text, removed = strip_page_furniture(page.text, furniture)
+        furniture_removed[page.pdf_page] = removed
+        chunk_pages.append(replace(page, text=text))
 
-    structure_config = profile.get("structure")
-    if isinstance(structure_config, dict) and structure_config.get("enabled"):
-        page_by_number = {page.pdf_page: page for page in pages}
-        for block in recover_structure(profile, pages):
-            page = page_by_number[block.pdf_page_start]
-            source_page_numbers = block.metadata.get(
-                "source_pages",
-                list(range(block.pdf_page_start, block.pdf_page_end + 1)),
+    state = IdentityState()
+    drafts: list[dict[str, Any]] = []
+    by_key: dict[tuple[str, str | None, str | None, str], dict[str, Any]] = {}
+    for block in _blocks(profile, chunk_pages):
+        block_pages = [original[number] for number in block.source_pages if number in original]
+        first_page = original[block.pdf_page_start]
+        if block.is_table:
+            pieces = [(chunk, None) for chunk in _split_table(block.text, max_chars)]
+        else:
+            pieces = []
+            for segment in split_at_headings(block.text):
+                heading = leading_heading(segment)
+                for position, chunk in enumerate(_split_paragraph(segment, max_chars)):
+                    # Only the piece that begins a segment can carry its heading.
+                    pieces.append((chunk, heading if position == 0 else None))
+        for chunk, heading in pieces:
+            identity_source = state.apply(heading)
+            key = (
+                " ".join(chunk.split()),
+                state.article_number,
+                state.section_number,
+                block.content_type,
             )
-            block_pages = [
-                page_by_number[number]
-                for number in source_page_numbers
-                if number in page_by_number
-            ]
-            extraction_methods = {item.extraction_method for item in block_pages}
-            correction_statuses = {item.correction_status for item in block_pages}
-            block_chunks = (
-                _split_table(block.text, max_chars)
-                if block.metadata.get("structure_kind") == "table"
-                else _split_paragraph(block.text, max_chars)
-            )
-            for chunk in block_chunks:
-                article_number, article_title, section_number, section_title = _metadata_context(
-                    chunk,
-                    article_number=article_number,
-                    article_title=article_title,
-                    section_number=section_number,
-                    section_title=section_title,
-                )
-                chunk_number += 1
-                configured_content_type = _content_type(
-                    profile,
-                    block.pdf_page_start,
-                )
-                content_type = (
-                    block.content_type
-                    if block.content_type != "main"
-                    else configured_content_type
-                )
-                context_parts = [
-                    str(profile.get("title") or ""),
-                    str(profile.get("edition") or ""),
-                    content_type,
-                    f"Article {article_number}" if article_number else "",
-                    article_title or "",
-                    f"Section {section_number}" if section_number else "",
-                    section_title or "",
-                    chunk,
-                ]
-                identity = (
-                    f"{profile['id']}:{source_hash}:{block.pdf_page_start}:"
-                    f"{block.pdf_page_end}:{chunk_number}:{chunk}"
-                ).encode()
-                metadata = {
+            location = {
+                "pdf_page_start": block.pdf_page_start,
+                "pdf_page_end": block.pdf_page_end,
+                "printed_page_start": block.printed_page_start,
+                "printed_page_end": block.printed_page_end,
+            }
+            if key in by_key:
+                by_key[key]["duplicate_locations"].append(location)
+                continue
+            draft = {
+                "content": chunk,
+                "content_type": block.content_type,
+                **location,
+                "article_number": state.article_number,
+                "article_title": state.article_title,
+                "section_number": state.section_number,
+                "section_title": state.section_title,
+                "metadata": {
                     "backend": str(profile["backend"]),
-                    "extraction_method": (
-                        next(iter(extraction_methods))
-                        if len(extraction_methods) == 1
-                        else "mixed"
+                    "extraction_method": _single_or_mixed(
+                        {item.extraction_method for item in block_pages}
                     ),
-                    "extraction_confidence": page.extraction_confidence,
-                    "correction_status": (
-                        next(iter(correction_statuses))
-                        if len(correction_statuses) == 1
-                        else "mixed"
+                    "extraction_confidence": first_page.extraction_confidence,
+                    "correction_status": _single_or_mixed(
+                        {item.correction_status for item in block_pages}
                     ),
-                    "correction_provider": page.correction_provider,
-                    "correction_model": page.correction_model,
-                    "correction_similarity": page.correction_similarity,
-                    "raw_text_sha256": hashlib.sha256(
-                        (page.raw_text if page.raw_text is not None else page.text).encode()
-                    ).hexdigest(),
+                    "correction_provider": first_page.correction_provider,
+                    "correction_model": first_page.correction_model,
+                    "correction_similarity": first_page.correction_similarity,
+                    "raw_text_sha256": _evidence_hash(first_page),
+                    "identity_source": identity_source,
+                    "identity_version": IDENTITY_VERSION,
                     "page_evidence": [
                         {
                             "pdf_page": item.pdf_page,
@@ -450,109 +493,62 @@ def documents_from_pages(
                             "correction_status": item.correction_status,
                             "correction_provider": item.correction_provider,
                             "correction_model": item.correction_model,
-                            "raw_text_sha256": hashlib.sha256(
-                                (
-                                    item.raw_text
-                                    if item.raw_text is not None
-                                    else item.text
-                                ).encode()
-                            ).hexdigest(),
+                            "raw_text_sha256": _evidence_hash(item),
+                            "furniture_lines_removed": furniture_removed.get(item.pdf_page, 0),
                         }
                         for item in block_pages
                     ],
-                    **block.metadata,
-                }
-                documents.append(
-                    CodebookDocument(
-                        id=f"{profile['id']}-{hashlib.sha256(identity).hexdigest()[:24]}",
-                        corpus_id=str(profile["id"]),
-                        source_name=source_path.name,
-                        source_sha256=source_hash,
-                        chunk_number=chunk_number,
-                        content=chunk,
-                        search_text="\n".join(part for part in context_parts if part),
-                        content_type=content_type,
-                        pdf_page_start=block.pdf_page_start,
-                        pdf_page_end=block.pdf_page_end,
-                        printed_page_start=block.printed_page_start,
-                        printed_page_end=block.printed_page_end,
-                        article_number=article_number,
-                        article_title=article_title,
-                        section_number=section_number,
-                        section_title=section_title,
-                        edition=str(profile["edition"]) if profile.get("edition") is not None else None,
-                        document_type=str(profile["document_type"]),
-                        metadata=metadata,
-                    )
-                )
-        return documents
+                    **(block.metadata or {}),
+                },
+                "duplicate_locations": [],
+            }
+            by_key[key] = draft
+            drafts.append(draft)
 
-    for page in pages:
-        paragraphs = [part.strip() for part in PARAGRAPH_PATTERN.split(page.text) if part.strip()]
-        for paragraph in paragraphs:
-            for chunk in _split_paragraph(paragraph, max_chars):
-                article_number, article_title, section_number, section_title = _metadata_context(
-                    chunk,
-                    article_number=article_number,
-                    article_title=article_title,
-                    section_number=section_number,
-                    section_title=section_title,
-                )
-                chunk_number += 1
-                content_type = _content_type(profile, page.pdf_page)
-                context_parts = [
-                    str(profile.get("title") or ""),
-                    str(profile.get("edition") or ""),
-                    content_type,
-                    f"Article {article_number}" if article_number else "",
-                    article_title or "",
-                    f"Section {section_number}" if section_number else "",
-                    section_title or "",
-                    chunk,
-                ]
-                search_text = "\n".join(part for part in context_parts if part)
-                identity = (
-                    f"{profile['id']}:{source_hash}:{page.pdf_page}:{chunk_number}:{chunk}"
-                ).encode()
-                document_id = f"{profile['id']}-{hashlib.sha256(identity).hexdigest()[:24]}"
-                documents.append(
-                    CodebookDocument(
-                        id=document_id,
-                        corpus_id=str(profile["id"]),
-                        source_name=source_path.name,
-                        source_sha256=source_hash,
-                        chunk_number=chunk_number,
-                        content=chunk,
-                        search_text=search_text,
-                        content_type=content_type,
-                        pdf_page_start=page.pdf_page,
-                        pdf_page_end=page.pdf_page,
-                        printed_page_start=page.printed_page,
-                        printed_page_end=page.printed_page,
-                        article_number=article_number,
-                        article_title=article_title,
-                        section_number=section_number,
-                        section_title=section_title,
-                        edition=str(profile["edition"]) if profile.get("edition") is not None else None,
-                        document_type=str(profile["document_type"]),
-                        metadata={
-                            "backend": str(profile["backend"]),
-                            "extraction_method": page.extraction_method,
-                            "extraction_confidence": page.extraction_confidence,
-                            "correction_status": page.correction_status,
-                            "correction_provider": page.correction_provider,
-                            "correction_model": page.correction_model,
-                            "correction_similarity": page.correction_similarity,
-                            "raw_text_sha256": hashlib.sha256(
-                                (
-                                    page.raw_text
-                                    if page.raw_text is not None
-                                    else page.text
-                                ).encode()
-                            ).hexdigest(),
-                        },
-                    )
-                )
+    documents: list[CodebookDocument] = []
+    span_ordinals: dict[tuple[int, int], int] = {}
+    for chunk_number, draft in enumerate(drafts, start=1):
+        span = (draft["pdf_page_start"], draft["pdf_page_end"])
+        ordinal = span_ordinals.get(span, 0)
+        span_ordinals[span] = ordinal + 1
+        content = draft["content"]
+        identity = f"{profile['id']}:{span[0]}:{span[1]}:{ordinal}:{content}".encode()
+        metadata = dict(draft["metadata"])
+        if draft["duplicate_locations"]:
+            metadata["duplicate_locations"] = draft["duplicate_locations"]
+        context_parts = [
+            str(profile.get("title") or ""),
+            str(profile.get("edition") or ""),
+            draft["content_type"],
+            f"Article {draft['article_number']}" if draft["article_number"] else "",
+            draft["article_title"] or "",
+            f"Section {draft['section_number']}" if draft["section_number"] else "",
+            draft["section_title"] or "",
+            content,
+        ]
+        documents.append(
+            CodebookDocument(
+                id=f"{profile['id']}-{hashlib.sha256(identity).hexdigest()[:24]}",
+                corpus_id=str(profile["id"]),
+                source_name=source_path.name,
+                source_sha256=source_hash,
+                chunk_number=chunk_number,
+                content=content,
+                search_text="\n".join(part for part in context_parts if part),
+                content_type=draft["content_type"],
+                pdf_page_start=draft["pdf_page_start"],
+                pdf_page_end=draft["pdf_page_end"],
+                printed_page_start=draft["printed_page_start"],
+                printed_page_end=draft["printed_page_end"],
+                article_number=draft["article_number"],
+                article_title=draft["article_title"],
+                section_number=draft["section_number"],
+                section_title=draft["section_title"],
+                edition=str(profile["edition"]) if profile.get("edition") is not None else None,
+                document_type=str(profile["document_type"]),
+                metadata=metadata,
+            )
+        )
     return documents
 
 

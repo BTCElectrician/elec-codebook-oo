@@ -8,8 +8,9 @@ from dataclasses import dataclass, replace
 from difflib import SequenceMatcher
 from typing import Any
 
+from .model_defaults import DEFAULT_CORRECTION_MODEL
 from .models import PageText
-from .text_models import DEFAULT_OPENAI_TEXT_MODEL, TEXT_MODEL_PROVIDERS, TextModelProvider
+from .text_models import TEXT_MODEL_PROVIDERS, TextModelProvider
 
 CORRECTION_MODES = {"off", "ocr-only", "all"}
 PROTECTED_TOKEN = re.compile(
@@ -25,7 +26,7 @@ class CorrectionConfig:
 
     mode: str = "off"
     provider: str = "openai"
-    model: str = DEFAULT_OPENAI_TEXT_MODEL
+    model: str = DEFAULT_CORRECTION_MODEL
     min_similarity: float = 0.82
     max_length_change_ratio: float = 0.20
 
@@ -48,7 +49,7 @@ class CorrectionConfig:
         return cls(
             mode=str(value.get("mode", "off")),
             provider=str(value.get("provider", "openai")),
-            model=str(value.get("model", DEFAULT_OPENAI_TEXT_MODEL)),
+            model=str(value.get("model") or DEFAULT_CORRECTION_MODEL),
             min_similarity=float(value.get("min_similarity", 0.82)),
             max_length_change_ratio=float(value.get("max_length_change_ratio", 0.20)),
         )

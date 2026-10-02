@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import Protocol
 
-DEFAULT_OPENAI_TEXT_MODEL = "gpt-5.6-terra"
+from .model_defaults import DEFAULT_SYNTHESIS_MODEL
+
+# Compatibility name; the registry in model_defaults.py is the source of truth.
+DEFAULT_OPENAI_TEXT_MODEL = DEFAULT_SYNTHESIS_MODEL
 TEXT_MODEL_PROVIDERS = {"openai"}
 
 

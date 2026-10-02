@@ -190,3 +190,69 @@ def test_real_pgvector_ingest_hybrid_search_and_grounded_answer(tmp_path):
         with psycopg.connect(database_url, autocommit=True) as connection:
             connection.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(schema)))
         _log("cleanup", schema=schema)
+
+
+@pytest.mark.pgvector
+def test_real_pgvector_reingest_keeps_unchanged_ids_when_chunk_numbers_shift(tmp_path):
+    database_url = _safe_test_database_url()
+    schema = f"codebook_test_{uuid.uuid4().hex[:12]}"
+    profile = {
+        "id": f"synthetic-{uuid.uuid4().hex[:10]}",
+        "title": "Synthetic Field Manual",
+        "edition": "2026",
+        "document_type": "training-manual",
+        "backend": "pgvector",
+        "questions": ["Authorized?"],
+    }
+    source = tmp_path / "manual.txt"
+    later_pages = "\f3.2 Bonding Jumpers\n\nInvented jumper text.\f3.3 Clearances\n\nInvented clearance text."
+    source.write_text("3.1 Scope\n\nInvented scope text." + later_pages, encoding="utf-8")
+    provider = HashEmbeddingProvider()
+    backend = PgVectorBackend(database_url, schema=schema, min_pool_size=1, max_pool_size=2)
+    try:
+        first = build_bundle(profile, source)
+        backend.index_documents(
+            profile=profile,
+            documents=first.documents,
+            embeddings=provider.embed([document.search_text for document in first.documents]),
+            embedding_provider=provider.name,
+            embedding_model=provider.model,
+            pages=first.pages,
+        )
+        # An added paragraph on page 1 renumbers every later chunk but must not
+        # change the ids of chunks on untouched pages.
+        source.write_text(
+            "3.1 Scope\n\nInvented scope text.\n\nAn added invented paragraph." + later_pages,
+            encoding="utf-8",
+        )
+        second = build_bundle(profile, source)
+        retained = {d.id for d in first.documents} & {d.id for d in second.documents}
+        assert {d.id for d in second.documents if d.pdf_page_start > 1} <= retained
+        count = backend.index_documents(
+            profile=profile,
+            documents=second.documents,
+            embeddings=provider.embed([document.search_text for document in second.documents]),
+            embedding_provider=provider.name,
+            embedding_model=provider.model,
+            pages=second.pages,
+        )
+        assert count == len(second.documents)
+        from psycopg import sql
+
+        with backend._pool.connection() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                sql.SQL(
+                    "SELECT id, chunk_number FROM {}.documents WHERE corpus_id = %s "
+                    "ORDER BY chunk_number"
+                ).format(sql.Identifier(schema)),
+                (profile["id"],),
+            )
+            stored = cursor.fetchall()
+        assert stored == [(d.id, d.chunk_number) for d in second.documents]
+    finally:
+        backend.close()
+        import psycopg
+        from psycopg import sql
+
+        with psycopg.connect(database_url, autocommit=True) as connection:
+            connection.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(schema)))
