@@ -10,13 +10,14 @@ from dataclasses import dataclass
 from itertools import pairwise
 from typing import Protocol
 
+from .model_defaults import DEFAULT_OPENAI_EMBEDDING_MODEL, HASH_EMBEDDING_MODEL
 from .models import EMBEDDING_DIMENSIONS
 
 TOKEN_PATTERN = re.compile(r"[a-z0-9]+(?:\.[a-z0-9]+)*")
 SUPPORTED_EMBEDDING_PROVIDERS = {"hash", "openai"}
 DEFAULT_EMBEDDING_MODELS = {
-    "hash": "codebook-hash-v1",
-    "openai": "text-embedding-3-small",
+    "hash": HASH_EMBEDDING_MODEL,
+    "openai": DEFAULT_OPENAI_EMBEDDING_MODEL,
 }
 DEFAULT_OPENAI_BATCH_SIZE = 512
 
@@ -42,7 +43,7 @@ class HashEmbeddingProvider:
 
     dimensions: int = EMBEDDING_DIMENSIONS
     name: str = "hash"
-    model: str = "codebook-hash-v1"
+    model: str = HASH_EMBEDDING_MODEL
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
         return [self._embed_one(text) for text in texts]
@@ -71,7 +72,7 @@ class OpenAIEmbeddingProvider:
         self,
         *,
         api_key: str,
-        model: str = "text-embedding-3-small",
+        model: str = DEFAULT_OPENAI_EMBEDDING_MODEL,
         dimensions: int = EMBEDDING_DIMENSIONS,
         batch_size: int = DEFAULT_OPENAI_BATCH_SIZE,
     ) -> None:
@@ -170,6 +171,6 @@ def build_embedding_provider(
     if normalized == "openai":
         return OpenAIEmbeddingProvider(
             api_key=api_key or "",
-            model=model or "text-embedding-3-small",
+            model=model or DEFAULT_OPENAI_EMBEDDING_MODEL,
         )
     raise ValueError(f"Unknown embedding provider: {name}. Choose hash or openai.")

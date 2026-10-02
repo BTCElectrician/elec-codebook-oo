@@ -86,7 +86,9 @@ machine contract, Make targets, and agent entry points.
    future provider boundary.
 7. Ask for approval immediately before `ingest --apply`.
 8. After indexing, run a representative search and verify source wording, PDF
-   and printed pages, and extraction provenance.
+   and printed pages, and extraction provenance. Spot-check that a chunk
+   continuing a section onto a new page carries that section's number, not a
+   number from the page header or a cross-reference.
 
 For pgvector, resolve `CODEBOOK_DATABASE_URL` without printing it. Confirm the
 target is not production unless the operator explicitly approved it.

@@ -7,6 +7,7 @@ from typing import Any
 from . import __version__
 from .core import SUPPORTED_BACKENDS
 from .embeddings import SUPPORTED_EMBEDDING_PROVIDERS
+from .model_defaults import DEFAULT_MODELS
 from .models import DOCUMENT_SCHEMA_VERSION, PAGE_SCHEMA_VERSION
 from .text_models import TEXT_MODEL_PROVIDERS
 
@@ -329,12 +330,18 @@ CODE_MAP = {
         "paths": [
             "codebook_agent/models.py",
             "codebook_agent/core.py",
+            "codebook_agent/identity.py",
             "tests/test_core.py",
+            "tests/test_identity.py",
         ],
         "invariants": [
             "raw page evidence remains recoverable",
             "schema changes are versioned",
-            "document identifiers are deterministic",
+            "document identifiers are deterministic and depend only on their own page span",
+            (
+                "article/section identity comes from a heading that opens the chunk, "
+                "never from page furniture, cross-references, or split continuations"
+            ),
         ],
     },
     "extraction-and-ocr": {
@@ -373,6 +380,16 @@ CODE_MAP = {
         "invariants": [
             "extractive mode is the default",
             "invalid synthesis citations fall back to extractive evidence",
+        ],
+    },
+    "model-defaults": {
+        "paths": [
+            "codebook_agent/model_defaults.py",
+            "tests/test_model_defaults.py",
+        ],
+        "invariants": [
+            "default model names are defined only in model_defaults.py",
+            "explicit profile or command-line model choices override the defaults",
         ],
     },
     "public-safety": {
@@ -464,7 +481,14 @@ def capabilities() -> dict[str, Any]:
         "implemented_ocr_engines": ["tesseract"],
         "implemented_ocr_correction_providers": sorted(TEXT_MODEL_PROVIDERS),
         "implemented_text_model_providers": sorted(TEXT_MODEL_PROVIDERS),
-        "implemented_structure_recovery": ["generic-blocks", "continued-tables"],
+        "implemented_structure_recovery": [
+            "generic-blocks",
+            "continued-tables",
+            "heading-derived-identity",
+            "page-furniture-exclusion",
+            "duplicate-chunk-collapse",
+        ],
+        "default_models": DEFAULT_MODELS,
         "implemented_answer_modes": [
             "extractive-grounded",
             "citation-validated-synthesis",

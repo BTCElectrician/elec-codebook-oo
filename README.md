@@ -92,6 +92,7 @@ replacement for the book, training, or field judgment.
 | Real OCR fallback | Image-only or low-text PDF pages use local Tesseract with confidence metadata |
 | Auditable OCR correction | Optional model repair preserves raw text and rejects changed identifiers |
 | Structure recovery | Generic headings, notes, definitions, lists, and explicitly continued tables |
+| Structural identity | Article/section labels come only from headings that open a chunk; running headers, footers, and cross-references are ignored |
 | Portable records | Versioned JSON and JSONL with source SHA-256 and explicit locators |
 | pgvector indexing | Atomic corpus replacement with stale-record cleanup |
 | Hybrid retrieval | PostgreSQL full-text search plus pgvector cosine similarity |
@@ -127,11 +128,11 @@ make test-pgvector
 make pgvector-down
 ```
 
-Example result:
+Example result (first passage of `make search`):
 
 ```text
-Article 1. A branch circuit is a circuit that supplies one or more outlets.
-Source: source.txt, Article 1, PDF page 1
+1. Article 1. A branch circuit is a circuit that supplies one or more outlets. This synthetic text is not a code requirement.
+   Source: source.txt, Article 1, PDF page 1
 ```
 
 ## Architecture
@@ -164,9 +165,11 @@ authorized .txt / .md / .pdf
              headings / lists / notes / tables
                                |
         page-preserving evidence and chunking
+        running headers/footers excluded;
+        identity only from opening headings
                      |
                      v
-       PageText v1.0 + CodebookDocument v2.2
+       PageText v1.0 + CodebookDocument v2.3
        - source SHA-256
        - PDF + printed page
        - content type
@@ -204,20 +207,22 @@ Every `CodebookDocument` has:
 
 | Field | Meaning |
 | --- | --- |
-| `id` | Deterministic identity derived from corpus, source hash, page, chunk, and content |
+| `id` | Deterministic identity from the corpus, the chunk's page span, its position within that span, and its text |
 | `corpus_id` | Profile-controlled corpus name |
 | `source_name` / `source_sha256` | Source locator and exact input fingerprint |
 | `content` / `search_text` | Evidence wording and metadata-enriched retrieval text |
 | `content_type` | `main`, `definitions`, `tables`, `annexes`, or a profile-defined type |
 | `pdf_page_start/end` | One-based file-page evidence |
 | `printed_page_start/end` | Optional human-visible page mapping |
-| `article_*` / `section_*` | Generic heading context when detected |
+| `article_*` / `section_*` | Heading context; see [Article and section identity](#article-and-section-identity) |
 | `metadata.extraction_method` | `native-text`, `native-pdf-text`, or `ocr-tesseract` |
 | `metadata.extraction_confidence` | Mean Tesseract word confidence for OCR-derived text |
 | `metadata.correction_*` | Model, score, and accepted/rejected correction decision |
 | `metadata.raw_text_sha256` | Link from a chunk to its immutable raw page extraction |
+| `metadata.identity_source` | `heading` when the chunk opens with its heading, `carried` when the label comes from an earlier heading |
+| `metadata.duplicate_locations` | Other pages holding the same text under the same identity, when a duplicate was collapsed |
 | `metadata` | JSON extension point for another manual or downstream schema |
-| `schema_version` | Contract version, currently `2.2` |
+| `schema_version` | Contract version, currently `2.3` |
 
 Ordinary chunks stay within a PDF page. A recovered table may span explicitly continued pages; its
 document records the complete PDF/printed page range and `metadata.source_pages`.
@@ -263,6 +268,34 @@ No edition-specific codebook grammar is required.
 This recovery is intentionally deterministic. It does not infer missing cells, read diagrams, or
 invent table geometry when extraction is ambiguous.
 
+### Article and section identity
+
+A wrong section label is worse than none: an exact-section lookup returns the wrong text with a
+confident citation. The identity rules below come from mislabeled chunks found in a production
+codebook index, where continuations were labeled from the guide number in a running page header,
+from a cross-reference, or from the previous article's last section.
+
+- A chunk gets an article or section number only from a heading on its first line. Later chunks
+  carry that label forward in reading order, across pages.
+- A heading looks like `3.1 Scope`, `Article 3. Grounding`, or `ARTICLE 3` on its own line. Prose
+  that happens to start with a number or a reference, such as `1.25 times the rating` or
+  `Article 4 requirements also apply`, does not change identity, and neither does a line that
+  continues a sentence (`as specified in` / `3.4 Grounding Electrode Conductors`).
+- A recognized heading in the middle of a paragraph starts a new chunk, so the text after it is
+  not filed under the earlier section.
+- When a paragraph is split for length, only the first piece can carry a heading.
+- A new article clears the previous section.
+- Lines repeated at the top or bottom of nearby pages (running headers, footers, page numbers) are
+  left out of chunk text and never set identity; [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#identity)
+  gives the exact rule. `pages.json` keeps them. Set
+  `"page_furniture": "off"` in the profile to keep them in chunks.
+- Identical text under the same identity, such as a page duplicated in a scan, is indexed once and
+  lists the other locations in `metadata.duplicate_locations` and in its citation.
+
+Document ids depend only on the chunk's own page span, position, and text, so an edit on one page
+no longer changes the id of every later chunk. These are text-layer rules; they do not read page
+geometry, so a header that the PDF text layer merges into a body line is not detected.
+
 ## PostgreSQL and pgvector
 
 The implemented pgvector adapter creates:
@@ -275,8 +308,13 @@ The implemented pgvector adapter creates:
 - a GIN full-text index;
 - an HNSW cosine vector index.
 
-Indexing is transactional. Records are upserted, and documents no longer present in the replacement
-run are deleted in the same transaction.
+Indexing is transactional. A document whose id and position are unchanged keeps its row; every
+other row of the corpus is replaced in the same transaction. Duplicate ids or chunk numbers are
+rejected before the database is touched.
+
+The hybrid query ranks vector candidates by exact cosine distance within the corpus, so a corpus
+filter never truncates them. The HNSW index exists but this query does not use it, which keeps
+results exact at the cost of reading every row in the corpus for each query.
 
 Retrieval combines two candidate lists:
 
@@ -314,9 +352,31 @@ The hash provider is a signed feature-hashing representation. It is useful for e
 overlap-driven local testing; it is not presented as a production semantic model. The selected
 provider and model are stored with the corpus, and queries must use that same contract.
 
-The OpenAI adapter batches document inputs while preserving result order. Pgvector ingest verifies
+The OpenAI adapter batches document inputs while preserving result order. The default OpenAI
+embedding model is `text-embedding-3-small` at 1,536 dimensions. Pgvector ingest verifies
 the configured database before making a paid embedding request. Selecting that provider is an
 explicit data-boundary decision because document `search_text` is sent to the provider.
+
+## Models
+
+Every default model name lives in
+[`codebook_agent/model_defaults.py`](codebook_agent/model_defaults.py). As of 2026-10-02:
+
+| Role | Default | Used when |
+| --- | --- | --- |
+| OCR correction | `gpt-6-luna` | `correction.mode` is `ocr-only` or `all` |
+| Answer synthesis | `gpt-6.1-sol` | `answer --answer-mode synthesized` |
+| Embeddings | `text-embedding-3-small` | `embedding.provider` is `openai` |
+| Offline embeddings | `codebook-hash-v1` | default; no provider call |
+
+A model named in a profile or on the command line overrides these. To adopt a newer model, change
+the constant in `model_defaults.py` and run `make check`; a test fails if any other tracked file
+still names a model that is not in the registry. `codebook capabilities --json` reports the
+current defaults under `default_models`.
+
+An existing pgvector corpus keeps the embedding model it was built with, and queries use that
+stored model. Changing the embedding default affects new ingests only; re-ingest a corpus to move
+it to a new embedding model.
 
 ## Installation
 
@@ -472,6 +532,7 @@ Profiles contain metadata, not source extracts:
   },
   "printed_page_offset": 8,
   "max_chunk_chars": 1800,
+  "page_furniture": "auto",
   "ocr": {
     "mode": "auto",
     "engine": "tesseract",
@@ -484,7 +545,6 @@ Profiles contain metadata, not source extracts:
   "correction": {
     "mode": "off",
     "provider": "openai",
-    "model": "gpt-5.6-terra",
     "min_similarity": 0.82,
     "max_length_change_ratio": 0.2
   },
@@ -591,8 +651,12 @@ codebook answer --profile /path/profile.json --query "minimum cover" \
 - OCR is word-oriented Tesseract output; complex diagrams and table geometry still require review.
 - Model correction sees extracted text, not the page image, and may be rejected by safety gates.
 - Printed-page mapping is profile offset-based; repeated edge-label candidates still require
-  operator confirmation, and arbitrary header/footer interpretation is not implemented.
+  operator confirmation. A source with missing or duplicated pages needs review, because one
+  offset cannot describe it.
+- Running headers and footers are found from repeated lines at page edges in the text layer, not
+  from page geometry.
 - Heading/structure detection is generic and deterministic, not an edition-specific NEC grammar.
+  It does not track Part or Chapter scope inside an article.
 - Only clearly labeled, delimited continued tables are joined; arbitrary layouts are not inferred.
 - `hash` embeddings are deterministic plumbing, not production semantic embeddings.
 - OpenAI embeddings are optional but are not exercised by credential-free CI.

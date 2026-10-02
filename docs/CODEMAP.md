@@ -25,6 +25,8 @@ codebook agent --json
 | Change CLI behavior, help, JSON, errors, or safety gates | `codebook_agent/cli_surface.py`, `codebook_agent/cli.py`, `codebook_agent/agent_contract.py` | `tests/test_agent_contract.py`, `tests/test_cli.py` | Data on stdout, diagnostics on stderr; stable exit meanings; writes remain apply-gated |
 | Change guided source inspection or profile proposals | `codebook_agent/configure.py`, `codebook_agent/cli.py`, `codebook_agent/agent_contract.py` | `tests/test_cli.py`, `tests/test_agent_contract.py` | Authorization precedes inspection; facts, candidates, confidence, and decisions stay distinct; no extracted text is returned; no network/provider calls; profile writes remain apply-gated |
 | Change document or page fields | `codebook_agent/models.py`, `codebook_agent/core.py` | `tests/test_core.py`, `tests/test_ocr.py` | Raw evidence remains recoverable; stable-field changes require a schema version |
+| Change article/section identity, page furniture, duplicate handling, or document ids | `codebook_agent/identity.py`, `codebook_agent/core.py` | `tests/test_identity.py`, `tests/test_pgvector_integration.py` | Identity comes only from a heading that opens a chunk; furniture and cross-references never set it; ids depend only on the chunk's own page span, position, and text |
+| Change a default model | `codebook_agent/model_defaults.py` | `tests/test_model_defaults.py` | Default names live only in the registry; explicit profile or CLI choices still win |
 | Change extraction or page mapping | `codebook_agent/core.py`, `codebook_agent/ocr.py` | `tests/test_core.py`, `tests/test_ocr.py`, `tests/test_ocr_unit.py` | PDF and printed pages remain explicit; source SHA-256 and extraction provenance survive |
 | Change OCR behavior | `codebook_agent/ocr.py` | `tests/test_ocr.py`, `tests/test_ocr_unit.py` | OCR stays local and is always labeled `ocr-tesseract` with confidence |
 | Change model correction | `codebook_agent/correction.py`, `codebook_agent/text_models.py` | `tests/test_correction.py`, `tests/test_text_models.py` | Raw text, provider/model, decision, and protected identifiers remain preserved |
@@ -48,6 +50,7 @@ authorized source
   -> optional local OCR
   -> optional explicit model correction
   -> deterministic structure recovery
+  -> structural identity              headings only; furniture excluded
   -> PageText + CodebookDocument
   -> local artifacts or pgvector
   -> SearchResult

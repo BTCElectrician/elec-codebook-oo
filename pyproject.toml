@@ -14,12 +14,14 @@ classifiers = [
   "Development Status :: 3 - Alpha",
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.13",
 ]
 dependencies = []
 
 [project.optional-dependencies]
-pdf = ["pypdf>=5.0"]
-ocr = ["pypdf>=5.0", "pypdfium2>=4.30", "pillow>=10.0"]
+pdf = ["pypdf>=6.0"]
+ocr = ["pypdf>=6.0", "pypdfium2>=4.30", "pillow>=10.3"]
 ai = ["openai>=1.68.0"]
 postgres = ["pgvector>=0.3.6", "psycopg[binary,pool]>=3.2"]
 dev = ["pytest>=8.0", "ruff>=0.6"]
